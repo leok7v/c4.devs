@@ -1,0 +1,7 @@
+c4
+# Build folder
+build/
+# Claude Code artifacts
+.claude/
+# Temporary test directory
+tmp/
