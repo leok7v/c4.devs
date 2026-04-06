@@ -20,6 +20,8 @@ int main(void) {
     int total = 0;
     total++;
     if (run("test/toys_foundation.c")) { fail++; }
+    total++;
+    if (run("test/toys_stream.c")) { fail++; }
     printf("\n%d/%d passed\n", total - fail, total);
     return fail ? -1 : 0;
 }
