@@ -19,6 +19,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdbool.h>
+#include <ctype.h>
 
 #if defined(__linux__)
     #define _GNU_SOURCE
@@ -120,6 +121,8 @@ enum {
     I_SCPY, I_SCMP, I_SLEN, I_SCAT, I_SNCM, I_ASRT, I_ALCA,
     I_MRED, I_MCLS, I_MWRT,
     I_LSEEK, I_MMAP, I_MUNMAP, I_MSYNC, I_FTRUNC, I_REN,
+    I_PUTS, I_ISDIG, I_ISSPC, I_ISALP, I_TOLOW,
+    I_SCHR, I_SRCHR, I_SSTR, I_ATOI,
     I_LAST
 };
 
@@ -248,9 +251,15 @@ void next() {
             pp = data;
             while (*p != 0 && *p != tk) {
                 if ((ival = *p++) == '\\') {
-                    if ((ival = *p++) == 'n') {
-                        ival = '\n';
-                    }
+                    ival = *p++;
+                    if (ival == 'n') { ival = '\n'; }
+                    else if (ival == 't') { ival = '\t'; }
+                    else if (ival == 'r') { ival = '\r'; }
+                    else if (ival == '0') { ival = 0; }
+                    else if (ival == 'a') { ival = 7; }
+                    else if (ival == 'b') { ival = 8; }
+                    else if (ival == 'f') { ival = 12; }
+                    else if (ival == 'v') { ival = 11; }
                 }
                 if (tk == '"') {
                     *data++ = ival;
@@ -448,6 +457,15 @@ void intrinsics() {
     intrinsic("msync", I_MSYNC);
     intrinsic("ftruncate", I_FTRUNC);
     intrinsic("rename", I_REN);
+    intrinsic("puts", I_PUTS);
+    intrinsic("isdigit", I_ISDIG);
+    intrinsic("isspace", I_ISSPC);
+    intrinsic("isalpha", I_ISALP);
+    intrinsic("tolower", I_TOLOW);
+    intrinsic("strchr", I_SCHR);
+    intrinsic("strrchr", I_SRCHR);
+    intrinsic("strstr", I_SSTR);
+    intrinsic("atoi", I_ATOI);
 }
 
 void expect(int64_t t, char *s) { // expect token t and advance, else fatal
@@ -1731,7 +1749,7 @@ void statement() {
                     } else if (ty == INT64 || ty >= PTR) { elem_sz = 8;
                     } else if (ty > INT64 && ty < FNPTR) {
                         elem_sz = ((int64_t *)struct_syms[ty-INT64-1])[Val];
-                    }
+                    } (void)elem_sz;
                     if (tk == Assign) {
                         next();
                         expect('{', "{ expected for array init");
@@ -2139,7 +2157,7 @@ char *preprocess(char *src, int srclen, char *out, char *filename, int depth) {
     char *s = src;
     char *end = src + srclen;
     int pp_line_local = 1;
-    int pragma_once = 0;
+    int pragma_once = 0; (void)pragma_once;
     // emit initial #line
     char *o = out;
     *o++ = '#'; *o++ = 'l'; *o++ = 'i'; *o++ = 'n'; *o++ = 'e';
@@ -2148,7 +2166,7 @@ char *preprocess(char *src, int srclen, char *out, char *filename, int depth) {
     while (*fn) { *o++ = *fn++; }
     *o++ = '"'; *o++ = '\n';
     while (s < end) {
-        char *line_start = s;
+        char *line_start = s; (void)line_start;
         // find end of line
         char *eol = s;
         while (eol < end && *eol != '\n') { eol++; }
@@ -2951,7 +2969,7 @@ int64_t *compile(char *filename) {
                             } else if (ty == INT64 || ty >= PTR) { elem_sz = 8;
                             } else if (ty > INT64 && ty < FNPTR) {
                                 elem_sz = ((int64_t*)struct_syms[ty-INT64-1])[Val];
-                            }
+                            } (void)elem_sz;
                             if (tk == Assign) {
                                 next();
                                 expect('{', "{ expected for array init");
@@ -3332,6 +3350,15 @@ int run(int64_t *pc, int argc, char **argv) {
             case I_MSYNC: a = msync((void*)sp[2], sp[1], sp[0]); break;
             case I_FTRUNC: a = ftruncate(sp[1], sp[0]); break;
             case I_REN: a = rename((const char*)sp[1], (const char*)sp[0]); break;
+            case I_PUTS: a = puts((char*)*sp); break;
+            case I_ISDIG: a = isdigit(*sp & 0xFF); break;
+            case I_ISSPC: a = isspace(*sp & 0xFF); break;
+            case I_ISALP: a = isalpha(*sp & 0xFF); break;
+            case I_TOLOW: a = tolower(*sp & 0xFF); break;
+            case I_SCHR: a = (int64_t)strchr((char*)sp[1], (int)*sp); break;
+            case I_SRCHR: a = (int64_t)strrchr((char*)sp[1], (int)*sp); break;
+            case I_SSTR: a = (int64_t)strstr((char*)sp[1], (char*)*sp); break;
+            case I_ATOI: a = atoi((char*)*sp); break;
             default:
                 printf("unknown instruction = %d! cycle = %d\n",
                     (int)i, (int)cycle);

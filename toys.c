@@ -3,6 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <ctype.h>
 
 #if os(linux)
 #define CX_O_CREAT 64
@@ -17,95 +18,19 @@
 #define CX_O_TRUNC O_TRUNC
 #endif
 
-void cx_err(char * s) {
+static void cx_err(char * s) {
     write(2, s, strlen(s));
 }
 
-void cx_out(char * s, int n) {
+static void cx_out(char * s, int n) {
     write(1, s, n);
 }
 
-void cx_puts(char * s) {
+static void cx_puts(char * s) {
     write(1, s, strlen(s));
 }
 
-int cx_isdigit(char c) {
-    return c >= '0' && c <= '9';
-}
-
-int cx_isspace(char c) {
-    return c == ' ' || c == 9 || c == '\n' || c == 13;
-}
-
-int cx_isalpha(char c) {
-    return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z';
-}
-
-int cx_tolower(char c) {
-    int r = c;
-    if (c >= 'A' && c <= 'Z') {
-        r = c + 32;
-    }
-    return r;
-}
-
-char * cx_strchr(char * s, char c) {
-    char * r = 0;
-    while (*s && !r) {
-        if (*s == c) {
-            r = s;
-        } else {
-            s++;
-        }
-    }
-    return r;
-}
-
-char * cx_strrchr(char * s, char c) {
-    char * r = 0;
-    while (*s) {
-        if (*s == c) {
-            r = s;
-        }
-        s++;
-    }
-    return r;
-}
-
-char * cx_strstr(char * s, char * sub) {
-    char * r = 0;
-    int slen = strlen(sub);
-    while (*s && !r) {
-        if (memcmp(s, sub, slen) == 0) {
-            r = s;
-        } else {
-            s++;
-        }
-    }
-    return r;
-}
-
-int cx_atoi(char * s) {
-    int n = 0;
-    int neg = 0;
-    while (*s == ' ' || *s == 9) {
-        s++;
-    }
-    if (*s == '-') {
-        neg = 1;
-        s++;
-    }
-    if (*s == '+') {
-        s++;
-    }
-    while (*s >= '0' && *s <= '9') {
-        n = n * 10 + (*s - '0');
-        s++;
-    }
-    return neg ? -n : n;
-}
-
-int cx_itoa(int n, char * buf) {
+static int cx_itoa(int n, char * buf) {
     char tmp[24];
     int len = 0;
     int neg = 0;
@@ -137,7 +62,7 @@ int cx_itoa(int n, char * buf) {
     return out;
 }
 
-int cx_itopad(int n, char * buf, int w) {
+static int cx_itopad(int n, char * buf, int w) {
     char tmp[24];
     int len = cx_itoa(n, tmp);
     int pad = w - len;
@@ -153,13 +78,13 @@ int cx_itopad(int n, char * buf, int w) {
     return pad + len;
 }
 
-void cx_putint(int fd, int n) {
+static void cx_putint(int fd, int n) {
     char buf[24];
     int len = cx_itoa(n, buf);
     write(fd, buf, len);
 }
 
-int cx_getline(int fd, char * buf, int cap) {
+static int cx_getline(int fd, char * buf, int cap) {
     int n = 0;
     int done = 0;
     char c = 0;
@@ -181,7 +106,7 @@ int cx_getline(int fd, char * buf, int cap) {
     return n;
 }
 
-int cx_openrd(char * path) {
+static int cx_openrd(char * path) {
     int fd = open(path, 0);
     if (fd < 0) {
         cx_err("cannot open: ");
@@ -191,7 +116,7 @@ int cx_openrd(char * path) {
     return fd;
 }
 
-char * readall(char * path, int * lenp) {
+static char * readall(char * path, int * lenp) {
     int fd = open(path, 0);
     char * buf = 0;
     if (fd < 0) {
@@ -213,15 +138,15 @@ char * readall(char * path, int * lenp) {
     return buf;
 }
 
-int cmd_true(int argc, char ** argv) {
+static int cmd_true(int argc, char ** argv) {
     return 0;
 }
 
-int cmd_false(int argc, char ** argv) {
+static int cmd_false(int argc, char ** argv) {
     return 1;
 }
 
-int cmd_echo(int argc, char ** argv) {
+static int cmd_echo(int argc, char ** argv) {
     int rc = 0;
     int nl = 1;
     int i = 1;
@@ -243,7 +168,7 @@ int cmd_echo(int argc, char ** argv) {
     return rc;
 }
 
-int cmd_yes(int argc, char ** argv) {
+static int cmd_yes(int argc, char ** argv) {
     int rc = 0;
     char * msg = "y";
     if (argc >= 2) {
@@ -256,7 +181,7 @@ int cmd_yes(int argc, char ** argv) {
     return rc;
 }
 
-int cmd_basename(int argc, char ** argv) {
+static int cmd_basename(int argc, char ** argv) {
     int rc = 0;
     if (argc < 2) {
         cx_err("basename: missing operand\n");
@@ -295,7 +220,7 @@ int cmd_basename(int argc, char ** argv) {
     return rc;
 }
 
-int cmd_dirname(int argc, char ** argv) {
+static int cmd_dirname(int argc, char ** argv) {
     int rc = 0;
     if (argc < 2) {
         cx_err("dirname: missing operand\n");
@@ -327,7 +252,7 @@ int cmd_dirname(int argc, char ** argv) {
     return rc;
 }
 
-int cmd_seq(int argc, char ** argv) {
+static int cmd_seq(int argc, char ** argv) {
     int rc = 0;
     int start = 1;
     int step = 1;
@@ -337,16 +262,16 @@ int cmd_seq(int argc, char ** argv) {
         rc = 1;
     }
     if (!rc && argc == 2) {
-        end = cx_atoi(argv[1]);
+        end = atoi(argv[1]);
     }
     if (!rc && argc == 3) {
-        start = cx_atoi(argv[1]);
-        end = cx_atoi(argv[2]);
+        start = atoi(argv[1]);
+        end = atoi(argv[2]);
     }
     if (!rc && argc >= 4) {
-        start = cx_atoi(argv[1]);
-        step = cx_atoi(argv[2]);
-        end = cx_atoi(argv[3]);
+        start = atoi(argv[1]);
+        step = atoi(argv[2]);
+        end = atoi(argv[3]);
     }
     if (!rc && step == 0) {
         cx_err("seq: step cannot be 0\n");
@@ -375,13 +300,13 @@ struct cmd {
 struct cmd cmds[32];
 int ncmds = 0;
 
-void cmd_reg(char * name, cmd_fn fn) {
+static void cmd_reg(char * name, cmd_fn fn) {
     cmds[ncmds].name = name;
     cmds[ncmds].fn = fn;
     ncmds++;
 }
 
-void setup(void) {
+static void setup(void) {
     cmd_reg("true", cmd_true);
     cmd_reg("false", cmd_false);
     cmd_reg("echo", cmd_echo);
@@ -391,7 +316,7 @@ void setup(void) {
     cmd_reg("seq", cmd_seq);
 }
 
-int dispatch(char * name, int argc, char ** argv) {
+static int dispatch(char * name, int argc, char ** argv) {
     cmd_fn fn = 0;
     int i = 0;
     while (i < ncmds && !fn) {
