@@ -3275,7 +3275,10 @@ int run(int64_t *pc, int argc, char **argv) {
             case MCPY:
                 a = (int64_t)memcpy((char *)sp[2], (char *)sp[1], *sp); break;
             case EXIT:
-                printf("exit(%d) cycle = %d\n", (int)*sp, (int)cycle);
+                if (debug) {
+                    printf("exit(%d) cycle = %d\n",
+                           (int)*sp, (int)cycle);
+                }
                 return *sp;
         // intrinsics
             case I_OPEN:
@@ -3293,7 +3296,10 @@ int run(int64_t *pc, int argc, char **argv) {
             case I_MSET: a = (int64_t)memset((char *)sp[2], sp[1], *sp); break;
             case I_MCMP: a = memcmp((char *)sp[2], (char *)sp[1], *sp); break;
             case I_EXIT:
-            printf("exit(%d) cycle = %d\n", (int)*sp, (int)cycle);
+            if (debug) {
+                printf("exit(%d) cycle = %d\n",
+                       (int)*sp, (int)cycle);
+            }
             return *sp;
             case I_WRIT: a = write(sp[2], (char *)sp[1], *sp); break;
             case I_SYST: a = system((char *)*sp); break;
