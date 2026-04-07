@@ -32,6 +32,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <dirent.h>
 #endif
 
 char *p, *lp, // current position in source code
@@ -123,6 +124,9 @@ enum {
     I_LSEEK, I_MMAP, I_MUNMAP, I_MSYNC, I_FTRUNC, I_REN,
     I_PUTS, I_ISDIG, I_ISSPC, I_ISALP, I_TOLOW,
     I_SCHR, I_SRCHR, I_SSTR, I_ATOI,
+    I_STAT, I_OPDIR, I_RDDIR, I_CLDIR,
+    I_UNLNK, I_MKDIR, I_RMDIR, I_GETCWD,
+    I_CHDIR, I_GETENV, I_ACCESS,
     I_LAST
 };
 
@@ -466,6 +470,17 @@ void intrinsics() {
     intrinsic("strrchr", I_SRCHR);
     intrinsic("strstr", I_SSTR);
     intrinsic("atoi", I_ATOI);
+    intrinsic("stat", I_STAT);
+    intrinsic("opendir", I_OPDIR);
+    intrinsic("readdir", I_RDDIR);
+    intrinsic("closedir", I_CLDIR);
+    intrinsic("unlink", I_UNLNK);
+    intrinsic("mkdir", I_MKDIR);
+    intrinsic("rmdir", I_RMDIR);
+    intrinsic("getcwd", I_GETCWD);
+    intrinsic("chdir", I_CHDIR);
+    intrinsic("getenv", I_GETENV);
+    intrinsic("access", I_ACCESS);
 }
 
 void expect(int64_t t, char *s) { // expect token t and advance, else fatal
@@ -2492,10 +2507,21 @@ void init_definitions() {
     add_symbol("O_RDWR", 2);
     add_symbol("O_CREAT", 0x200);
     add_symbol("O_TRUNC", 0x400);
+    add_symbol("O_APPEND", 0x008);
     // From unistd.h (for lseek)
     add_symbol("SEEK_SET", 0);
     add_symbol("SEEK_CUR", 1);
     add_symbol("SEEK_END", 2);
+    // From sys/stat.h - POSIX standard octal values
+    add_symbol("S_IFMT",  0170000);
+    add_symbol("S_IFDIR", 0040000);
+    add_symbol("S_IFREG", 0100000);
+    add_symbol("S_IFLNK", 0120000);
+    // From unistd.h - access() mode flags
+    add_symbol("R_OK", 4);
+    add_symbol("W_OK", 2);
+    add_symbol("X_OK", 1);
+    add_symbol("F_OK", 0);
 }
 
 int64_t *compile(char *filename) {
@@ -2552,6 +2578,7 @@ int64_t *compile(char *filename) {
     pp_cond_sp = 0;
     pp_once_count = 0;
     pp_os_init();
+    pp_define("__cx__", 6, "1", 1, -1);
     // process -D command line defines
     int di = 0;
     while (di < cmdline_def_count) {
@@ -3359,6 +3386,41 @@ int run(int64_t *pc, int argc, char **argv) {
             case I_SRCHR: a = (int64_t)strrchr((char*)sp[1], (int)*sp); break;
             case I_SSTR: a = (int64_t)strstr((char*)sp[1], (char*)*sp); break;
             case I_ATOI: a = atoi((char*)*sp); break;
+#ifndef __cx__
+            case I_STAT: {
+                struct stat ns;
+                int sr = stat((const char*)sp[1], &ns);
+                if (sr == 0) {
+                    int64_t* out = (int64_t*)sp[0];
+                    out[0] = (int64_t)ns.st_mode;
+                    out[1] = (int64_t)ns.st_size;
+                    out[2] = (int64_t)ns.st_mtime;
+                    out[3] = (int64_t)ns.st_nlink;
+                    out[4] = (int64_t)ns.st_uid;
+                }
+                a = sr;
+                break;
+            }
+            case I_OPDIR: a = (int64_t)opendir((char*)*sp); break;
+            case I_RDDIR: {
+                struct dirent* de = readdir((DIR*)*sp);
+                a = de ? (int64_t)de->d_name : 0;
+                break;
+            }
+            case I_CLDIR: a = closedir((DIR*)*sp); break;
+#else
+            case I_STAT: a = -1; break;
+            case I_OPDIR: a = 0; break;
+            case I_RDDIR: a = 0; break;
+            case I_CLDIR: a = -1; break;
+#endif
+            case I_UNLNK: a = unlink((char*)*sp); break;
+            case I_MKDIR: a = mkdir((char*)sp[1], (int)*sp); break;
+            case I_RMDIR: a = rmdir((char*)*sp); break;
+            case I_GETCWD: a = (int64_t)getcwd((char*)sp[1], *sp); break;
+            case I_CHDIR: a = chdir((char*)*sp); break;
+            case I_GETENV: a = (int64_t)getenv((char*)*sp); break;
+            case I_ACCESS: a = access((char*)sp[1], (int)*sp); break;
             default:
                 printf("unknown instruction = %d! cycle = %d\n",
                     (int)i, (int)cycle);
