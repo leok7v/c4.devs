@@ -197,6 +197,16 @@ static int lines_read(struct lines * l, int fd) {
     return l->count;
 }
 
+typedef int (*cmd_fn)(int, char **);
+
+struct cmd {
+    char * name;
+    cmd_fn fn;
+};
+
+struct cmd cmds[64];
+int ncmds = 0;
+
 static int cmd_true(int argc, char ** argv) {
     return 0;
 }
@@ -1217,15 +1227,536 @@ static int cmd_printf(int argc, char ** argv) {
     return rc;
 }
 
-typedef int (*cmd_fn)(int, char **);
-
-struct cmd {
-    char * name;
-    cmd_fn fn;
+struct cx_stat {
+    int mode;
+    int size;
+    int mtime;
+    int nlink;
+    int uid;
 };
 
-struct cmd cmds[64];
-int ncmds = 0;
+static void cx_writes(int fd, char * s) {
+    write(fd, s, strlen(s));
+}
+
+static int dir_exists(char * path) {
+    int yes = 0;
+    struct cx_stat st;
+    if (stat(path, &st) == 0) {
+        if ((st.mode & S_IFMT) == S_IFDIR) {
+            yes = 1;
+        }
+    }
+    return yes;
+}
+
+static int mkdir_p(char * path) {
+    int rc = 0;
+    char buf[4096];
+    int len = strlen(path);
+    if (len >= 4096) {
+        rc = -1;
+    }
+    if (!rc) {
+        memcpy(buf, path, len + 1);
+        int i = 1;
+        while (i <= len && !rc) {
+            if (buf[i] == '/' || buf[i] == 0) {
+                char save = buf[i];
+                buf[i] = 0;
+                if (!dir_exists(buf)) {
+                    if (mkdir(buf, 493) != 0) {
+                        rc = -1;
+                    }
+                }
+                buf[i] = save;
+            }
+            i++;
+        }
+    }
+    return rc;
+}
+
+static int copy_file(char * src, char * dst) {
+    int rc = 0;
+    int sfd = open(src, 0);
+    if (sfd < 0) {
+        rc = -1;
+    }
+    if (!rc) {
+        int dfd = open(dst, 1 | CX_O_CREAT | CX_O_TRUNC, 420);
+        if (dfd < 0) {
+            close(sfd);
+            rc = -1;
+        }
+        if (!rc) {
+            char buf[4096];
+            int n = read(sfd, buf, 4096);
+            while (n > 0) {
+                write(dfd, buf, n);
+                n = read(sfd, buf, 4096);
+            }
+            close(dfd);
+            close(sfd);
+        }
+    }
+    return rc;
+}
+
+static int rm_recursive(char * path) {
+    int rc = 0;
+    struct cx_stat st;
+    if (stat(path, &st) != 0) {
+        rc = -1;
+    }
+    if (!rc && (st.mode & S_IFMT) == S_IFDIR) {
+        char * names = (char*)malloc(64 * 256);
+        int ncount = 0;
+        int dp = opendir(path);
+        if (dp == 0) {
+            rc = -1;
+        }
+        if (!rc) {
+            char * name = readdir(dp);
+            while (name && ncount < 64) {
+                if (strcmp(name, ".") != 0 &&
+                    strcmp(name, "..") != 0) {
+                    int nl = strlen(name);
+                    if (nl < 256) {
+                        memcpy(names + ncount * 256, name, nl + 1);
+                        ncount++;
+                    }
+                }
+                name = readdir(dp);
+            }
+            closedir(dp);
+            int i = 0;
+            while (i < ncount && !rc) {
+                char child[4096];
+                int plen = strlen(path);
+                int nlen = strlen(names + i * 256);
+                if (plen + 1 + nlen < 4096) {
+                    memcpy(child, path, plen);
+                    child[plen] = '/';
+                    memcpy(child + plen + 1,
+                           names + i * 256, nlen + 1);
+                    if (rm_recursive(child) != 0) {
+                        rc = -1;
+                    }
+                }
+                i++;
+            }
+        }
+        free(names);
+        if (!rc) {
+            if (rmdir(path) != 0) {
+                rc = -1;
+            }
+        }
+    }
+    if (!rc && (st.mode & S_IFMT) != S_IFDIR) {
+        if (unlink(path) != 0) {
+            rc = -1;
+        }
+    }
+    return rc;
+}
+
+static int cmd_pwd(int argc, char ** argv) {
+    int rc = 0;
+    char buf[4096];
+    char * p = getcwd(buf, 4096);
+    if (p) {
+        cx_puts(buf);
+        cx_out("\n", 1);
+    } else {
+        cx_err("pwd: cannot get cwd\n");
+        rc = 1;
+    }
+    return rc;
+}
+
+static int cmd_touch(int argc, char ** argv) {
+    int rc = 0;
+    int i = 1;
+    while (i < argc && !rc) {
+        int fd = open(argv[i], 1 | CX_O_CREAT, 420);
+        if (fd < 0) {
+            cx_err("touch: cannot create: ");
+            cx_err(argv[i]);
+            cx_err("\n");
+            rc = 1;
+        } else {
+            close(fd);
+        }
+        i++;
+    }
+    return rc;
+}
+
+static int cmd_mkdir(int argc, char ** argv) {
+    int rc = 0;
+    int parents = 0;
+    int i = 1;
+    while (i < argc && argv[i][0] == '-') {
+        if (argv[i][1] == 'p') {
+            parents = 1;
+        }
+        i++;
+    }
+    while (i < argc && !rc) {
+        int r;
+        if (parents) {
+            r = mkdir_p(argv[i]);
+        } else {
+            r = mkdir(argv[i], 493);
+        }
+        if (r != 0) {
+            cx_err("mkdir: cannot create: ");
+            cx_err(argv[i]);
+            cx_err("\n");
+            rc = 1;
+        }
+        i++;
+    }
+    return rc;
+}
+
+static int cmd_rmdir(int argc, char ** argv) {
+    int rc = 0;
+    int i = 1;
+    while (i < argc && !rc) {
+        if (rmdir(argv[i]) != 0) {
+            cx_err("rmdir: cannot remove: ");
+            cx_err(argv[i]);
+            cx_err("\n");
+            rc = 1;
+        }
+        i++;
+    }
+    return rc;
+}
+
+static int cmd_rm(int argc, char ** argv) {
+    int rc = 0;
+    int recursive = 0;
+    int force = 0;
+    int i = 1;
+    while (i < argc && argv[i][0] == '-') {
+        char * f = argv[i] + 1;
+        while (*f) {
+            if (*f == 'r' || *f == 'R') {
+                recursive = 1;
+            }
+            if (*f == 'f') {
+                force = 1;
+            }
+            f++;
+        }
+        i++;
+    }
+    while (i < argc && !rc) {
+        int r;
+        if (recursive) {
+            r = rm_recursive(argv[i]);
+        } else {
+            r = unlink(argv[i]);
+        }
+        if (r != 0 && !force) {
+            cx_err("rm: cannot remove: ");
+            cx_err(argv[i]);
+            cx_err("\n");
+            rc = 1;
+        }
+        i++;
+    }
+    return rc;
+}
+
+static int cmd_cp(int argc, char ** argv) {
+    int rc = 0;
+    if (argc < 3) {
+        cx_err("cp: usage: cp SRC DST\n");
+        rc = 1;
+    }
+    if (!rc) {
+        if (copy_file(argv[1], argv[2]) != 0) {
+            cx_err("cp: failed: ");
+            cx_err(argv[1]);
+            cx_err(" -> ");
+            cx_err(argv[2]);
+            cx_err("\n");
+            rc = 1;
+        }
+    }
+    return rc;
+}
+
+static int cmd_mv(int argc, char ** argv) {
+    int rc = 0;
+    if (argc < 3) {
+        cx_err("mv: usage: mv SRC DST\n");
+        rc = 1;
+    }
+    if (!rc) {
+        if (rename(argv[1], argv[2]) != 0) {
+            cx_err("mv: failed: ");
+            cx_err(argv[1]);
+            cx_err(" -> ");
+            cx_err(argv[2]);
+            cx_err("\n");
+            rc = 1;
+        }
+    }
+    return rc;
+}
+
+static int cmd_ln(int argc, char ** argv) {
+    int rc = 0;
+    int symbolic = 0;
+    int i = 1;
+    while (i < argc && argv[i][0] == '-') {
+        if (argv[i][1] == 's') {
+            symbolic = 1;
+        }
+        i++;
+    }
+    if (argc - i < 2) {
+        cx_err("ln: need target and link name\n");
+        rc = 1;
+    }
+    if (!rc) {
+        char * target = argv[i];
+        char * linkname = argv[i + 1];
+        int r;
+        if (symbolic) {
+            r = symlink(target, linkname);
+        } else {
+            r = link(target, linkname);
+        }
+        if (r != 0) {
+            cx_err("ln: failed\n");
+            rc = 1;
+        }
+    }
+    return rc;
+}
+
+static int cmd_chmod(int argc, char ** argv) {
+    int rc = 0;
+    if (argc < 3) {
+        cx_err("chmod: usage: chmod MODE FILE\n");
+        rc = 1;
+    }
+    if (!rc) {
+        int mode = 0;
+        char * s = argv[1];
+        while (*s >= '0' && *s <= '7') {
+            mode = mode * 8 + (*s - '0');
+            s++;
+        }
+        int j = 2;
+        while (j < argc && !rc) {
+            if (chmod(argv[j], mode) != 0) {
+                cx_err("chmod: failed: ");
+                cx_err(argv[j]);
+                cx_err("\n");
+                rc = 1;
+            }
+            j++;
+        }
+    }
+    return rc;
+}
+
+static int cmd_cd(int argc, char ** argv) {
+    int rc = 0;
+    char * target = "/";
+    if (argc >= 2) {
+        target = argv[1];
+    }
+    if (chdir(target) != 0) {
+        cx_err("cd: cannot chdir: ");
+        cx_err(target);
+        cx_err("\n");
+        rc = 1;
+    }
+    return rc;
+}
+
+static int cmd_env(int argc, char ** argv) {
+    int rc = 0;
+    char * known[8];
+    known[0] = "PATH";
+    known[1] = "HOME";
+    known[2] = "USER";
+    known[3] = "SHELL";
+    known[4] = "TERM";
+    known[5] = "PWD";
+    known[6] = "LANG";
+    known[7] = 0;
+    int i = 0;
+    while (known[i]) {
+        char * v = getenv(known[i]);
+        if (v) {
+            cx_puts(known[i]);
+            cx_out("=", 1);
+            cx_puts(v);
+            cx_out("\n", 1);
+        }
+        i++;
+    }
+    return rc;
+}
+
+static int cmd_install(int argc, char ** argv) {
+    int rc = 0;
+    if (argc < 2) {
+        cx_err("install: usage: install DIR\n");
+        rc = 1;
+    }
+    char cwd[4096];
+    if (!rc) {
+        if (mkdir_p(argv[1]) != 0) {
+            cx_err("install: cannot create target\n");
+            rc = 1;
+        }
+    }
+    if (!rc) {
+        if (getcwd(cwd, 4096) == 0) {
+            cx_err("install: cannot get cwd\n");
+            rc = 1;
+        }
+    }
+    if (!rc) {
+        int i = 0;
+        while (i < ncmds && !rc) {
+            char path[4096];
+            int tl = strlen(argv[1]);
+            int nl = strlen(cmds[i].name);
+            memcpy(path, argv[1], tl);
+            if (tl > 0 && path[tl - 1] != '/') {
+                path[tl] = '/';
+                tl++;
+            }
+            memcpy(path + tl, cmds[i].name, nl + 1);
+            int fd = open(path, 1 | CX_O_CREAT | CX_O_TRUNC, 493);
+            if (fd < 0) {
+                cx_err("install: cannot write: ");
+                cx_err(path);
+                cx_err("\n");
+                rc = 1;
+            } else {
+                cx_writes(fd, "#!/bin/sh\nexec ");
+                cx_writes(fd, cwd);
+                cx_writes(fd, "/build/cx ");
+                cx_writes(fd, cwd);
+                cx_writes(fd, "/toys.c ");
+                cx_writes(fd, cmds[i].name);
+                cx_writes(fd, " \"$@\"\n");
+                close(fd);
+            }
+            i++;
+        }
+    }
+    return rc;
+}
+
+static int cmd_ls(int argc, char ** argv) {
+    int rc = 0;
+    int show_all = 0;
+    int long_fmt = 0;
+    int i = 1;
+    while (i < argc && argv[i][0] == '-') {
+        char * f = argv[i] + 1;
+        while (*f) {
+            if (*f == 'a') {
+                show_all = 1;
+            }
+            if (*f == 'l') {
+                long_fmt = 1;
+            }
+            f++;
+        }
+        i++;
+    }
+    char * dir = ".";
+    if (i < argc) {
+        dir = argv[i];
+    }
+    int dp = opendir(dir);
+    if (dp == 0) {
+        cx_err("ls: cannot open: ");
+        cx_err(dir);
+        cx_err("\n");
+        rc = 1;
+    }
+    if (!rc) {
+        char * names = (char*)malloc(256 * 256);
+        int ncount = 0;
+        char * name = readdir(dp);
+        while (name && ncount < 256) {
+            if (show_all || name[0] != '.') {
+                int nl = strlen(name);
+                if (nl < 256) {
+                    memcpy(names + ncount * 256, name, nl + 1);
+                    ncount++;
+                }
+            }
+            name = readdir(dp);
+        }
+        closedir(dp);
+        int x = 1;
+        while (x < ncount) {
+            char key[256];
+            memcpy(key, names + x * 256, 256);
+            int y = x - 1;
+            int done = 0;
+            while (y >= 0 && !done) {
+                if (strcmp(names + y * 256, key) > 0) {
+                    memcpy(names + (y + 1) * 256,
+                           names + y * 256, 256);
+                    y--;
+                } else {
+                    done = 1;
+                }
+            }
+            memcpy(names + (y + 1) * 256, key, 256);
+            x++;
+        }
+        int j = 0;
+        while (j < ncount) {
+            char * n = names + j * 256;
+            if (long_fmt) {
+                char path[4096];
+                int dl = strlen(dir);
+                memcpy(path, dir, dl);
+                if (dl > 0 && path[dl - 1] != '/') {
+                    path[dl] = '/';
+                    dl++;
+                }
+                int nl2 = strlen(n);
+                memcpy(path + dl, n, nl2 + 1);
+                struct cx_stat st;
+                if (stat(path, &st) == 0) {
+                    char ch = '-';
+                    if ((st.mode & S_IFMT) == S_IFDIR) {
+                        ch = 'd';
+                    }
+                    write(1, &ch, 1);
+                    cx_out(" ", 1);
+                    cx_putint(1, st.size);
+                    cx_out(" ", 1);
+                }
+            }
+            cx_puts(n);
+            cx_out("\n", 1);
+            j++;
+        }
+        free(names);
+    }
+    return rc;
+}
 
 static void cmd_reg(char * name, cmd_fn fn) {
     cmds[ncmds].name = name;
@@ -1259,6 +1790,19 @@ static void setup(void) {
     cmd_reg("uniq", cmd_uniq);
     cmd_reg("sort", cmd_sort);
     cmd_reg("printf", cmd_printf);
+    cmd_reg("pwd", cmd_pwd);
+    cmd_reg("touch", cmd_touch);
+    cmd_reg("mkdir", cmd_mkdir);
+    cmd_reg("rmdir", cmd_rmdir);
+    cmd_reg("rm", cmd_rm);
+    cmd_reg("cp", cmd_cp);
+    cmd_reg("mv", cmd_mv);
+    cmd_reg("ln", cmd_ln);
+    cmd_reg("chmod", cmd_chmod);
+    cmd_reg("cd", cmd_cd);
+    cmd_reg("env", cmd_env);
+    cmd_reg("install", cmd_install);
+    cmd_reg("ls", cmd_ls);
 }
 
 static int dispatch(char * name, int argc, char ** argv) {

@@ -26,6 +26,8 @@ int main(void) {
     if (run("test/toys_text.c")) { fail++; }
     total++;
     if (run("test/toys_intrinsics.c")) { fail++; }
+    total++;
+    if (run("test/toys_filesystem.c")) { fail++; }
     printf("\n%d/%d passed\n", total - fail, total);
     return fail ? -1 : 0;
 }

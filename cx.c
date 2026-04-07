@@ -127,6 +127,7 @@ enum {
     I_STAT, I_OPDIR, I_RDDIR, I_CLDIR,
     I_UNLNK, I_MKDIR, I_RMDIR, I_GETCWD,
     I_CHDIR, I_GETENV, I_ACCESS,
+    I_CHMOD, I_LINK, I_SYMLNK,
     I_LAST
 };
 
@@ -481,6 +482,9 @@ void intrinsics() {
     intrinsic("chdir", I_CHDIR);
     intrinsic("getenv", I_GETENV);
     intrinsic("access", I_ACCESS);
+    intrinsic("chmod", I_CHMOD);
+    intrinsic("link", I_LINK);
+    intrinsic("symlink", I_SYMLNK);
 }
 
 void expect(int64_t t, char *s) { // expect token t and advance, else fatal
@@ -3421,6 +3425,9 @@ int run(int64_t *pc, int argc, char **argv) {
             case I_CHDIR: a = chdir((char*)*sp); break;
             case I_GETENV: a = (int64_t)getenv((char*)*sp); break;
             case I_ACCESS: a = access((char*)sp[1], (int)*sp); break;
+            case I_CHMOD: a = chmod((char*)sp[1], (int)*sp); break;
+            case I_LINK: a = link((char*)sp[1], (char*)*sp); break;
+            case I_SYMLNK: a = symlink((char*)sp[1], (char*)*sp); break;
             default:
                 printf("unknown instruction = %d! cycle = %d\n",
                     (int)i, (int)cycle);
