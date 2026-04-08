@@ -128,6 +128,7 @@ enum {
     I_UNLNK, I_MKDIR, I_RMDIR, I_GETCWD,
     I_CHDIR, I_GETENV, I_ACCESS,
     I_CHMOD, I_LINK, I_SYMLNK,
+    I_DUP2, I_PIPE,
     I_LAST
 };
 
@@ -485,6 +486,8 @@ void intrinsics() {
     intrinsic("chmod", I_CHMOD);
     intrinsic("link", I_LINK);
     intrinsic("symlink", I_SYMLNK);
+    intrinsic("dup2", I_DUP2);
+    intrinsic("pipe", I_PIPE);
 }
 
 void expect(int64_t t, char *s) { // expect token t and advance, else fatal
@@ -3428,6 +3431,18 @@ int run(int64_t *pc, int argc, char **argv) {
             case I_CHMOD: a = chmod((char*)sp[1], (int)*sp); break;
             case I_LINK: a = link((char*)sp[1], (char*)*sp); break;
             case I_SYMLNK: a = symlink((char*)sp[1], (char*)*sp); break;
+            case I_DUP2: a = dup2((int)sp[1], (int)*sp); break;
+            case I_PIPE: {
+                int nfds[2];
+                int pr = pipe(nfds);
+                if (pr == 0) {
+                    int64_t* out = (int64_t*)*sp;
+                    out[0] = (int64_t)nfds[0];
+                    out[1] = (int64_t)nfds[1];
+                }
+                a = pr;
+                break;
+            }
             default:
                 printf("unknown instruction = %d! cycle = %d\n",
                     (int)i, (int)cycle);

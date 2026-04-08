@@ -471,30 +471,30 @@ static int cmd_tail(int argc, char ** argv) {
 static void wc_fd(int fd, int * wl, int * ww, int * wb) {
     char buf[4096];
     int in_word = 0;
-    int lines = 0;
-    int words = 0;
-    int bytes = 0;
+    int nl = 0;
+    int nw = 0;
+    int nb = 0;
     int n = read(fd, buf, 4096);
     while (n > 0) {
-        bytes = bytes + n;
+        nb = nb + n;
         int j = 0;
         while (j < n) {
             if (buf[j] == '\n') {
-                lines++;
+                nl++;
             }
             if (isspace(buf[j])) {
                 in_word = 0;
             } else if (!in_word) {
                 in_word = 1;
-                words++;
+                nw++;
             }
             j++;
         }
         n = read(fd, buf, 4096);
     }
-    *wl = *wl + lines;
-    *ww = *ww + words;
-    *wb = *wb + bytes;
+    *wl = *wl + nl;
+    *ww = *ww + nw;
+    *wb = *wb + nb;
 }
 
 static int cmd_wc(int argc, char ** argv) {
@@ -1773,6 +1773,7 @@ char sh_var_vals[16384];
 int sh_var_count = 0;
 int sh_last_rc = 0;
 char sh_expanded[16384];
+int sh_tmp_counter = 0;
 
 static int sh_is_var_char(char c) {
     return (c >= 'a' && c <= 'z') ||
@@ -1866,6 +1867,17 @@ static void sh_tokenize(char * line) {
                         wc == '|' || wc == '&' || wc == ';' ||
                         wc == '<' || wc == '>') {
                         wdone = 1;
+                    } else if (wc == '"' || wc == '\'') {
+                        char quote = wc;
+                        i++;
+                        while (line[i] && line[i] != quote && o < 255) {
+                            sh_tok_buf[sh_tok_count * 256 + o] = line[i];
+                            o++;
+                            i++;
+                        }
+                        if (line[i] == quote) {
+                            i++;
+                        }
                     } else {
                         sh_tok_buf[sh_tok_count * 256 + o] = wc;
                         o++;
@@ -1934,23 +1946,90 @@ static void sh_expand_word(char * src, char * dst, int max) {
     dst[o] = 0;
 }
 
-static void sh_exec_words(int start, int end) {
-    int argc = end - start;
-    int handled = 0;
-    if (argc <= 0) {
-        handled = 1;
-    }
+static void sh_make_tmp_name(char * out, int idx) {
+    strcpy(out, "/tmp/cx_pipe_");
+    char nbuf[16];
+    cx_itoa(idx, nbuf);
+    strcat(out, nbuf);
+}
+
+static int sh_exec_segment(int start, int end) {
     char * argv[64];
-    if (!handled) {
-        int i = 0;
-        while (i < argc) {
-            char * src = sh_tok_buf + (start + i) * 256;
-            char * dst = sh_expanded + i * 256;
+    int argc = 0;
+    char stdin_path[256];
+    char stdout_path[256];
+    int has_stdin = 0;
+    int has_stdout = 0;
+    int append_stdout = 0;
+    int i = start;
+    while (i < end) {
+        int t = sh_tok_types[i];
+        if (t == SH_WORD) {
+            char * src = sh_tok_buf + i * 256;
+            char * dst = sh_expanded + argc * 256;
             sh_expand_word(src, dst, 256);
-            argv[i] = dst;
+            argv[argc] = dst;
+            argc++;
+            i++;
+        } else if (t == SH_REDIN && i + 1 < end) {
+            sh_expand_word(sh_tok_buf + (i + 1) * 256,
+                           stdin_path, 256);
+            has_stdin = 1;
+            i += 2;
+        } else if (t == SH_REDOUT && i + 1 < end) {
+            sh_expand_word(sh_tok_buf + (i + 1) * 256,
+                           stdout_path, 256);
+            has_stdout = 1;
+            append_stdout = 0;
+            i += 2;
+        } else if (t == SH_REDAPP && i + 1 < end) {
+            sh_expand_word(sh_tok_buf + (i + 1) * 256,
+                           stdout_path, 256);
+            has_stdout = 1;
+            append_stdout = 1;
+            i += 2;
+        } else {
             i++;
         }
-        if (argc == 1) {
+    }
+    int rc = 0;
+    int saved_in = -1;
+    int saved_out = -1;
+    if (has_stdin) {
+        int fd = open(stdin_path, 0);
+        if (fd < 0) {
+            cx_err("sh: cannot open: ");
+            cx_err(stdin_path);
+            cx_err("\n");
+            rc = 1;
+        } else {
+            saved_in = dup2(0, 100);
+            dup2(fd, 0);
+            close(fd);
+        }
+    }
+    if (!rc && has_stdout) {
+        int flags = 1 | CX_O_CREAT;
+        if (append_stdout) {
+            flags = flags | O_APPEND;
+        } else {
+            flags = flags | CX_O_TRUNC;
+        }
+        int fd = open(stdout_path, flags, 420);
+        if (fd < 0) {
+            cx_err("sh: cannot open: ");
+            cx_err(stdout_path);
+            cx_err("\n");
+            rc = 1;
+        } else {
+            saved_out = dup2(1, 101);
+            dup2(fd, 1);
+            close(fd);
+        }
+    }
+    if (!rc) {
+        int handled = 0;
+        if (argc == 1 && sh_tok_types[start] == SH_WORD) {
             char * raw = sh_tok_buf + start * 256;
             char * eq = strchr(raw, '=');
             if (eq && eq != raw) {
@@ -1961,13 +2040,102 @@ static void sh_exec_words(int start, int end) {
                 char vv[256];
                 sh_expand_word(eq + 1, vv, 256);
                 sh_set_var(vn, vv);
-                sh_last_rc = 0;
+                rc = 0;
                 handled = 1;
             }
         }
-        if (!handled) {
-            sh_last_rc = dispatch(argv[0], argc, argv);
+        if (!handled && argc > 0) {
+            rc = dispatch(argv[0], argc, argv);
         }
+    }
+    if (saved_in >= 0) {
+        dup2(saved_in, 0);
+        close(saved_in);
+    }
+    if (saved_out >= 0) {
+        dup2(saved_out, 1);
+        close(saved_out);
+    }
+    return rc;
+}
+
+static void sh_run_pipeline(int start, int end) {
+    int seg_count = 1;
+    int i = start;
+    while (i < end) {
+        if (sh_tok_types[i] == SH_PIPE) {
+            seg_count++;
+        }
+        i++;
+    }
+    if (seg_count == 1) {
+        sh_last_rc = sh_exec_segment(start, end);
+    } else {
+        char tmps[512];
+        int n_tmps = seg_count - 1;
+        if (n_tmps > 8) {
+            n_tmps = 8;
+        }
+        int t = 0;
+        while (t < n_tmps) {
+            sh_make_tmp_name(tmps + t * 64, sh_tmp_counter);
+            sh_tmp_counter++;
+            t++;
+        }
+        int seg_starts[9];
+        int seg_ends[9];
+        int sc = 0;
+        seg_starts[0] = start;
+        i = start;
+        while (i < end && sc < 8) {
+            if (sh_tok_types[i] == SH_PIPE) {
+                seg_ends[sc] = i;
+                sc++;
+                seg_starts[sc] = i + 1;
+            }
+            i++;
+        }
+        seg_ends[sc] = end;
+        sc++;
+        int s = 0;
+        int rc = 0;
+        while (s < sc) {
+            int saved_in = -1;
+            int saved_out = -1;
+            if (s > 0) {
+                int fd = open(tmps + (s - 1) * 64, 0);
+                if (fd >= 0) {
+                    saved_in = dup2(0, 100);
+                    dup2(fd, 0);
+                    close(fd);
+                }
+            }
+            if (s < sc - 1) {
+                int fd = open(tmps + s * 64,
+                    1 | CX_O_CREAT | CX_O_TRUNC, 420);
+                if (fd >= 0) {
+                    saved_out = dup2(1, 101);
+                    dup2(fd, 1);
+                    close(fd);
+                }
+            }
+            rc = sh_exec_segment(seg_starts[s], seg_ends[s]);
+            if (saved_in >= 0) {
+                dup2(saved_in, 0);
+                close(saved_in);
+            }
+            if (saved_out >= 0) {
+                dup2(saved_out, 1);
+                close(saved_out);
+            }
+            s++;
+        }
+        t = 0;
+        while (t < n_tmps) {
+            unlink(tmps + t * 64);
+            t++;
+        }
+        sh_last_rc = rc;
     }
 }
 
@@ -1975,9 +2143,12 @@ static void sh_run_tokens(int start, int end) {
     int i = start;
     int prev_op = SH_SEMI;
     while (i < end) {
-        int cmd_end = i;
-        while (cmd_end < end && sh_tok_types[cmd_end] == SH_WORD) {
-            cmd_end++;
+        int p_end = i;
+        while (p_end < end &&
+               sh_tok_types[p_end] != SH_SEMI &&
+               sh_tok_types[p_end] != SH_AND &&
+               sh_tok_types[p_end] != SH_OR) {
+            p_end++;
         }
         int run = 0;
         if (prev_op == SH_SEMI) {
@@ -1987,14 +2158,14 @@ static void sh_run_tokens(int start, int end) {
         } else if (prev_op == SH_OR && sh_last_rc != 0) {
             run = 1;
         }
-        if (run && cmd_end > i) {
-            sh_exec_words(i, cmd_end);
+        if (run && p_end > i) {
+            sh_run_pipeline(i, p_end);
         }
-        if (cmd_end < end) {
-            prev_op = sh_tok_types[cmd_end];
-            i = cmd_end + 1;
+        if (p_end < end) {
+            prev_op = sh_tok_types[p_end];
+            i = p_end + 1;
         } else {
-            i = cmd_end;
+            i = p_end;
         }
     }
 }
