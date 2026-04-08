@@ -1946,6 +1946,41 @@ static void sh_expand_word(char * src, char * dst, int max) {
     dst[o] = 0;
 }
 
+static void sh_run_tokens(int start, int end);
+
+static cmd_fn sh_find_cmd(char * name) {
+    cmd_fn result = 0;
+    int i = 0;
+    while (i < ncmds && !result) {
+        if (strcmp(name, cmds[i].name) == 0) {
+            result = cmds[i].fn;
+        }
+        i++;
+    }
+    return result;
+}
+
+static int sh_run_external(int argc, char ** argv) {
+    char cmdline[4096];
+    int cl = 0;
+    int j = 0;
+    while (j < argc && cl < 4000) {
+        if (j > 0) {
+            cmdline[cl] = ' ';
+            cl++;
+        }
+        int al = strlen(argv[j]);
+        if (cl + al < 4000) {
+            memcpy(cmdline + cl, argv[j], al);
+            cl += al;
+        }
+        j++;
+    }
+    cmdline[cl] = 0;
+    int wstatus = system(cmdline);
+    return wstatus / 256;
+}
+
 static void sh_make_tmp_name(char * out, int idx) {
     strcpy(out, "/tmp/cx_pipe_");
     char nbuf[16];
@@ -2044,8 +2079,45 @@ static int sh_exec_segment(int start, int end) {
                 handled = 1;
             }
         }
+        if (!handled && argc >= 2 &&
+            (strcmp(argv[0], "source") == 0 ||
+             strcmp(argv[0], ".") == 0)) {
+            int fd = open(argv[1], 0);
+            if (fd < 0) {
+                cx_err("source: cannot open: ");
+                cx_err(argv[1]);
+                cx_err("\n");
+                rc = 1;
+            } else {
+                char * sb = (char*)malloc(16384);
+                int * st = (int*)malloc(64 * 8);
+                memcpy(sb, sh_tok_buf, 16384);
+                memcpy(st, sh_tok_types, 64 * 8);
+                int sc = sh_tok_count;
+                char line[4096];
+                int n = cx_getline(fd, line, 4096);
+                while (n > 0) {
+                    sh_tokenize(line);
+                    sh_run_tokens(0, sh_tok_count);
+                    n = cx_getline(fd, line, 4096);
+                }
+                close(fd);
+                memcpy(sh_tok_buf, sb, 16384);
+                memcpy(sh_tok_types, st, 64 * 8);
+                sh_tok_count = sc;
+                free(sb);
+                free(st);
+                rc = sh_last_rc;
+            }
+            handled = 1;
+        }
         if (!handled && argc > 0) {
-            rc = dispatch(argv[0], argc, argv);
+            cmd_fn fn = sh_find_cmd(argv[0]);
+            if (fn) {
+                rc = fn(argc, argv);
+            } else {
+                rc = sh_run_external(argc, argv);
+            }
         }
     }
     if (saved_in >= 0) {
