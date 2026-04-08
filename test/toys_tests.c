@@ -32,6 +32,8 @@ int main(void) {
     if (run("test/toys_shell.c")) { fail++; }
     total++;
     if (run("test/toys_selfhost.c")) { fail++; }
+    total++;
+    if (run("test/toys_advanced.c")) { fail++; }
     printf("\n%d/%d passed\n", total - fail, total);
     return fail ? -1 : 0;
 }

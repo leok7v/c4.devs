@@ -1758,6 +1758,317 @@ static int cmd_ls(int argc, char ** argv) {
     return rc;
 }
 
+static int find_walk(char * path, char * name_pat, char tf) {
+    int rc = 0;
+    struct cx_stat st;
+    if (stat(path, &st) != 0) {
+        rc = -1;
+    }
+    if (!rc) {
+        int show = 1;
+        if (name_pat) {
+            char * base = path;
+            char * p = path;
+            while (*p) {
+                if (*p == '/') {
+                    base = p + 1;
+                }
+                p++;
+            }
+            if (strcmp(base, name_pat) != 0) {
+                show = 0;
+            }
+        }
+        if (show && tf) {
+            int is_dir = (st.mode & S_IFMT) == S_IFDIR;
+            int is_reg = (st.mode & S_IFMT) == S_IFREG;
+            if (tf == 'f' && !is_reg) {
+                show = 0;
+            }
+            if (tf == 'd' && !is_dir) {
+                show = 0;
+            }
+        }
+        if (show) {
+            cx_puts(path);
+            cx_out("\n", 1);
+        }
+        if ((st.mode & S_IFMT) == S_IFDIR) {
+            int dp = opendir(path);
+            if (dp != 0) {
+                char * names = (char*)malloc(64 * 256);
+                int n = 0;
+                char * name = readdir(dp);
+                while (name && n < 64) {
+                    if (strcmp(name, ".") != 0 &&
+                        strcmp(name, "..") != 0) {
+                        int nl = strlen(name);
+                        if (nl < 256) {
+                            memcpy(names + n * 256, name, nl + 1);
+                            n++;
+                        }
+                    }
+                    name = readdir(dp);
+                }
+                closedir(dp);
+                int i = 0;
+                while (i < n) {
+                    char child[4096];
+                    int plen = strlen(path);
+                    int nlen = strlen(names + i * 256);
+                    if (plen + 1 + nlen < 4096) {
+                        memcpy(child, path, plen);
+                        child[plen] = '/';
+                        memcpy(child + plen + 1,
+                               names + i * 256, nlen + 1);
+                        find_walk(child, name_pat, tf);
+                    }
+                    i++;
+                }
+                free(names);
+            }
+        }
+    }
+    return rc;
+}
+
+static int cmd_find(int argc, char ** argv) {
+    int rc = 0;
+    char * start = ".";
+    char * name_pat = 0;
+    char tf = 0;
+    int i = 1;
+    if (i < argc && argv[i][0] != '-') {
+        start = argv[i];
+        i++;
+    }
+    while (i < argc) {
+        if (strcmp(argv[i], "-name") == 0 && i + 1 < argc) {
+            name_pat = argv[i + 1];
+            i += 2;
+        } else if (strcmp(argv[i], "-type") == 0 &&
+                   i + 1 < argc) {
+            tf = argv[i + 1][0];
+            i += 2;
+        } else {
+            i++;
+        }
+    }
+    find_walk(start, name_pat, tf);
+    return rc;
+}
+
+static int cmd_xargs(int argc, char ** argv) {
+    int rc = 0;
+    if (argc < 2) {
+        cx_err("xargs: usage: xargs CMD [ARGS...]\n");
+        rc = 1;
+    }
+    if (!rc) {
+        char input[16384];
+        int total = 0;
+        int n = read(0, input + total, 16384 - total - 1);
+        while (n > 0 && total < 16383) {
+            total += n;
+            n = read(0, input + total, 16384 - total - 1);
+        }
+        input[total] = 0;
+        char cmdline[16384];
+        int cl = 0;
+        int j = 1;
+        while (j < argc && cl < 16000) {
+            int al = strlen(argv[j]);
+            if (cl + al < 16000) {
+                memcpy(cmdline + cl, argv[j], al);
+                cl += al;
+                cmdline[cl] = ' ';
+                cl++;
+            }
+            j++;
+        }
+        int p = 0;
+        while (p < total && cl < 16000) {
+            while (p < total && (input[p] == ' ' ||
+                   input[p] == '\t' || input[p] == '\n')) {
+                p++;
+            }
+            int wstart = p;
+            while (p < total && input[p] != ' ' &&
+                   input[p] != '\t' && input[p] != '\n') {
+                p++;
+            }
+            int wlen = p - wstart;
+            if (wlen > 0 && cl + wlen + 1 < 16000) {
+                memcpy(cmdline + cl, input + wstart, wlen);
+                cl += wlen;
+                cmdline[cl] = ' ';
+                cl++;
+            }
+        }
+        cmdline[cl] = 0;
+        int sysrc = system(cmdline);
+        rc = sysrc / 256;
+    }
+    return rc;
+}
+
+static int test_eval2(char * arg, char op) {
+    int result = 1;
+    if (op == 'e') {
+        if (access(arg, F_OK) == 0) {
+            result = 0;
+        }
+    } else if (op == 'f') {
+        struct cx_stat st;
+        if (stat(arg, &st) == 0 &&
+            (st.mode & S_IFMT) == S_IFREG) {
+            result = 0;
+        }
+    } else if (op == 'd') {
+        struct cx_stat st;
+        if (stat(arg, &st) == 0 &&
+            (st.mode & S_IFMT) == S_IFDIR) {
+            result = 0;
+        }
+    } else if (op == 'r') {
+        if (access(arg, R_OK) == 0) {
+            result = 0;
+        }
+    } else if (op == 'w') {
+        if (access(arg, W_OK) == 0) {
+            result = 0;
+        }
+    } else if (op == 'x') {
+        if (access(arg, X_OK) == 0) {
+            result = 0;
+        }
+    } else if (op == 'z') {
+        if (strlen(arg) == 0) {
+            result = 0;
+        }
+    } else if (op == 'n') {
+        if (strlen(arg) > 0) {
+            result = 0;
+        }
+    }
+    return result;
+}
+
+static int test_eval3(char * a, char * op, char * b) {
+    int result = 1;
+    if (strcmp(op, "=") == 0) {
+        if (strcmp(a, b) == 0) {
+            result = 0;
+        }
+    } else if (strcmp(op, "!=") == 0) {
+        if (strcmp(a, b) != 0) {
+            result = 0;
+        }
+    } else if (strcmp(op, "-eq") == 0) {
+        if (atoi(a) == atoi(b)) {
+            result = 0;
+        }
+    } else if (strcmp(op, "-ne") == 0) {
+        if (atoi(a) != atoi(b)) {
+            result = 0;
+        }
+    } else if (strcmp(op, "-lt") == 0) {
+        if (atoi(a) < atoi(b)) {
+            result = 0;
+        }
+    } else if (strcmp(op, "-le") == 0) {
+        if (atoi(a) <= atoi(b)) {
+            result = 0;
+        }
+    } else if (strcmp(op, "-gt") == 0) {
+        if (atoi(a) > atoi(b)) {
+            result = 0;
+        }
+    } else if (strcmp(op, "-ge") == 0) {
+        if (atoi(a) >= atoi(b)) {
+            result = 0;
+        }
+    }
+    return result;
+}
+
+static int cmd_test(int argc, char ** argv) {
+    int rc = 1;
+    int end = argc;
+    int ok = 1;
+    if (strcmp(argv[0], "[") == 0) {
+        if (argc < 2 || strcmp(argv[argc - 1], "]") != 0) {
+            cx_err("[: missing ]\n");
+            ok = 0;
+        } else {
+            end = argc - 1;
+        }
+    }
+    if (ok) {
+        int n = end - 1;
+        if (n == 1) {
+            if (strlen(argv[1]) > 0) {
+                rc = 0;
+            }
+        } else if (n == 2 && argv[1][0] == '-' &&
+                   argv[1][2] == 0) {
+            rc = test_eval2(argv[2], argv[1][1]);
+        } else if (n == 3) {
+            rc = test_eval3(argv[1], argv[2], argv[3]);
+        } else if (n == 0) {
+            rc = 1;
+        }
+    }
+    return rc;
+}
+
+static int cmd_which(int argc, char ** argv) {
+    int rc = 0;
+    if (argc < 2) {
+        cx_err("which: usage: which NAME\n");
+        rc = 1;
+    }
+    if (!rc) {
+        char * path = getenv("PATH");
+        if (!path) {
+            rc = 1;
+        }
+        if (!rc) {
+            char * name = argv[1];
+            int found = 0;
+            int p = 0;
+            int plen = strlen(path);
+            while (p < plen && !found) {
+                int e = p;
+                while (e < plen && path[e] != ':') {
+                    e++;
+                }
+                int dlen = e - p;
+                if (dlen > 0) {
+                    char full[4096];
+                    int nlen = strlen(name);
+                    if (dlen + 1 + nlen < 4096) {
+                        memcpy(full, path + p, dlen);
+                        full[dlen] = '/';
+                        memcpy(full + dlen + 1,
+                               name, nlen + 1);
+                        if (access(full, X_OK) == 0) {
+                            cx_puts(full);
+                            cx_out("\n", 1);
+                            found = 1;
+                        }
+                    }
+                }
+                p = e + 1;
+            }
+            if (!found) {
+                rc = 1;
+            }
+        }
+    }
+    return rc;
+}
+
 static int dispatch(char * name, int argc, char ** argv);
 
 enum {
@@ -2298,6 +2609,11 @@ static void setup(void) {
     cmd_reg("env", cmd_env);
     cmd_reg("install", cmd_install);
     cmd_reg("ls", cmd_ls);
+    cmd_reg("find", cmd_find);
+    cmd_reg("xargs", cmd_xargs);
+    cmd_reg("test", cmd_test);
+    cmd_reg("[", cmd_test);
+    cmd_reg("which", cmd_which);
     cmd_reg("sh", cmd_sh);
 }
 
