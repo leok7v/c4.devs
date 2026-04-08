@@ -1758,6 +1758,258 @@ static int cmd_ls(int argc, char ** argv) {
     return rc;
 }
 
+static int dispatch(char * name, int argc, char ** argv);
+
+enum {
+    SH_WORD = 1, SH_PIPE, SH_REDOUT, SH_REDAPP, SH_REDIN,
+    SH_AND, SH_OR, SH_SEMI, SH_BG
+};
+
+char sh_tok_buf[16384];
+int sh_tok_types[64];
+int sh_tok_count = 0;
+char sh_var_names[4096];
+char sh_var_vals[16384];
+int sh_var_count = 0;
+int sh_last_rc = 0;
+char sh_expanded[16384];
+
+static int sh_is_var_char(char c) {
+    return (c >= 'a' && c <= 'z') ||
+           (c >= 'A' && c <= 'Z') ||
+           (c >= '0' && c <= '9') ||
+           c == '_';
+}
+
+static char * sh_get_var(char * name) {
+    char * result = 0;
+    int i = 0;
+    while (i < sh_var_count && !result) {
+        if (strcmp(sh_var_names + i * 64, name) == 0) {
+            result = sh_var_vals + i * 256;
+        }
+        i++;
+    }
+    if (!result) {
+        result = getenv(name);
+    }
+    return result;
+}
+
+static void sh_set_var(char * name, char * value) {
+    int i = 0;
+    int found = 0;
+    while (i < sh_var_count && !found) {
+        if (strcmp(sh_var_names + i * 64, name) == 0) {
+            strcpy(sh_var_vals + i * 256, value);
+            found = 1;
+        }
+        i++;
+    }
+    if (!found && sh_var_count < 64) {
+        strcpy(sh_var_names + sh_var_count * 64, name);
+        strcpy(sh_var_vals + sh_var_count * 256, value);
+        sh_var_count++;
+    }
+}
+
+static void sh_emit_op(int type) {
+    sh_tok_buf[sh_tok_count * 256] = 0;
+    sh_tok_types[sh_tok_count] = type;
+    sh_tok_count++;
+}
+
+static void sh_tokenize(char * line) {
+    sh_tok_count = 0;
+    int i = 0;
+    int done = 0;
+    while (line[i] && !done && sh_tok_count < 64) {
+        while (line[i] == ' ' || line[i] == '\t' ||
+               line[i] == '\n') {
+            i++;
+        }
+        if (!line[i]) {
+            done = 1;
+        }
+        if (!done) {
+            char c = line[i];
+            if (c == '&' && line[i + 1] == '&') {
+                sh_emit_op(SH_AND);
+                i += 2;
+            } else if (c == '|' && line[i + 1] == '|') {
+                sh_emit_op(SH_OR);
+                i += 2;
+            } else if (c == '|') {
+                sh_emit_op(SH_PIPE);
+                i++;
+            } else if (c == ';') {
+                sh_emit_op(SH_SEMI);
+                i++;
+            } else if (c == '>' && line[i + 1] == '>') {
+                sh_emit_op(SH_REDAPP);
+                i += 2;
+            } else if (c == '>') {
+                sh_emit_op(SH_REDOUT);
+                i++;
+            } else if (c == '<') {
+                sh_emit_op(SH_REDIN);
+                i++;
+            } else if (c == '&') {
+                sh_emit_op(SH_BG);
+                i++;
+            } else {
+                int o = 0;
+                int wdone = 0;
+                while (line[i] && !wdone && o < 255) {
+                    char wc = line[i];
+                    if (wc == ' ' || wc == '\t' || wc == '\n' ||
+                        wc == '|' || wc == '&' || wc == ';' ||
+                        wc == '<' || wc == '>') {
+                        wdone = 1;
+                    } else {
+                        sh_tok_buf[sh_tok_count * 256 + o] = wc;
+                        o++;
+                        i++;
+                    }
+                }
+                sh_tok_buf[sh_tok_count * 256 + o] = 0;
+                sh_tok_types[sh_tok_count] = SH_WORD;
+                sh_tok_count++;
+            }
+        }
+    }
+}
+
+static void sh_expand_word(char * src, char * dst, int max) {
+    int i = 0;
+    int o = 0;
+    while (src[i] && o < max - 1) {
+        if (src[i] == '$') {
+            i++;
+            char vn[64];
+            int vl = 0;
+            if (src[i] == '?') {
+                vn[vl] = '?';
+                vl++;
+                i++;
+            } else {
+                while (sh_is_var_char(src[i]) && vl < 63) {
+                    vn[vl] = src[i];
+                    vl++;
+                    i++;
+                }
+            }
+            vn[vl] = 0;
+            if (vl > 0) {
+                if (strcmp(vn, "?") == 0) {
+                    char buf[16];
+                    int blen = cx_itoa(sh_last_rc, buf);
+                    int k = 0;
+                    while (k < blen && o < max - 1) {
+                        dst[o] = buf[k];
+                        o++;
+                        k++;
+                    }
+                } else {
+                    char * val = sh_get_var(vn);
+                    if (val) {
+                        int k = 0;
+                        while (val[k] && o < max - 1) {
+                            dst[o] = val[k];
+                            o++;
+                            k++;
+                        }
+                    }
+                }
+            } else {
+                dst[o] = '$';
+                o++;
+            }
+        } else {
+            dst[o] = src[i];
+            o++;
+            i++;
+        }
+    }
+    dst[o] = 0;
+}
+
+static void sh_exec_words(int start, int end) {
+    int argc = end - start;
+    int handled = 0;
+    if (argc <= 0) {
+        handled = 1;
+    }
+    char * argv[64];
+    if (!handled) {
+        int i = 0;
+        while (i < argc) {
+            char * src = sh_tok_buf + (start + i) * 256;
+            char * dst = sh_expanded + i * 256;
+            sh_expand_word(src, dst, 256);
+            argv[i] = dst;
+            i++;
+        }
+        if (argc == 1) {
+            char * raw = sh_tok_buf + start * 256;
+            char * eq = strchr(raw, '=');
+            if (eq && eq != raw) {
+                int nlen = eq - raw;
+                char vn[64];
+                memcpy(vn, raw, nlen);
+                vn[nlen] = 0;
+                char vv[256];
+                sh_expand_word(eq + 1, vv, 256);
+                sh_set_var(vn, vv);
+                sh_last_rc = 0;
+                handled = 1;
+            }
+        }
+        if (!handled) {
+            sh_last_rc = dispatch(argv[0], argc, argv);
+        }
+    }
+}
+
+static void sh_run_tokens(int start, int end) {
+    int i = start;
+    int prev_op = SH_SEMI;
+    while (i < end) {
+        int cmd_end = i;
+        while (cmd_end < end && sh_tok_types[cmd_end] == SH_WORD) {
+            cmd_end++;
+        }
+        int run = 0;
+        if (prev_op == SH_SEMI) {
+            run = 1;
+        } else if (prev_op == SH_AND && sh_last_rc == 0) {
+            run = 1;
+        } else if (prev_op == SH_OR && sh_last_rc != 0) {
+            run = 1;
+        }
+        if (run && cmd_end > i) {
+            sh_exec_words(i, cmd_end);
+        }
+        if (cmd_end < end) {
+            prev_op = sh_tok_types[cmd_end];
+            i = cmd_end + 1;
+        } else {
+            i = cmd_end;
+        }
+    }
+}
+
+static int cmd_sh(int argc, char ** argv) {
+    char line[4096];
+    int n = cx_getline(0, line, 4096);
+    while (n > 0) {
+        sh_tokenize(line);
+        sh_run_tokens(0, sh_tok_count);
+        n = cx_getline(0, line, 4096);
+    }
+    return sh_last_rc;
+}
+
 static void cmd_reg(char * name, cmd_fn fn) {
     cmds[ncmds].name = name;
     cmds[ncmds].fn = fn;
@@ -1803,6 +2055,7 @@ static void setup(void) {
     cmd_reg("env", cmd_env);
     cmd_reg("install", cmd_install);
     cmd_reg("ls", cmd_ls);
+    cmd_reg("sh", cmd_sh);
 }
 
 static int dispatch(char * name, int argc, char ** argv) {
