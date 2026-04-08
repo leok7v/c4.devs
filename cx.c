@@ -9,6 +9,12 @@
 // just enough features to allow self-compilation and a bit more
 // Written by Robert Swierczek
 
+#if defined(__APPLE__)
+#define _DARWIN_C_SOURCE
+#endif
+#if defined(__linux__)
+#define _GNU_SOURCE
+#endif
 #define _POSIX_C_SOURCE 200809L
 
 #include <stdio.h>
@@ -21,18 +27,12 @@
 #include <stdbool.h>
 #include <ctype.h>
 
-#if defined(__linux__)
-    #define _GNU_SOURCE
-#elif defined(__APPLE__)
-    #define _DARWIN_C_SOURCE
-#endif
-
 #if defined(__APPLE__) || defined(__linux__)
 #include <sys/mman.h>
 #include <sys/stat.h>
-#include <fcntl.h>
-#include <unistd.h>
 #include <dirent.h>
+#include <signal.h>
+#include <time.h>
 #endif
 
 char *p, *lp, // current position in source code
@@ -129,6 +129,7 @@ enum {
     I_CHDIR, I_GETENV, I_ACCESS,
     I_CHMOD, I_LINK, I_SYMLNK,
     I_DUP2, I_PIPE,
+    I_TIME, I_LTIME, I_SLEEP, I_KILL,
     I_LAST
 };
 
@@ -488,6 +489,10 @@ void intrinsics() {
     intrinsic("symlink", I_SYMLNK);
     intrinsic("dup2", I_DUP2);
     intrinsic("pipe", I_PIPE);
+    intrinsic("time", I_TIME);
+    intrinsic("localtime", I_LTIME);
+    intrinsic("sleep", I_SLEEP);
+    intrinsic("kill", I_KILL);
 }
 
 void expect(int64_t t, char *s) { // expect token t and advance, else fatal
@@ -3443,6 +3448,30 @@ int run(int64_t *pc, int argc, char **argv) {
                 a = pr;
                 break;
             }
+            case I_TIME: a = (int64_t)time(0); break;
+            case I_SLEEP: a = sleep((int)*sp); break;
+            case I_KILL: a = kill((int)sp[1], (int)*sp); break;
+#ifndef __cx__
+            case I_LTIME: {
+                time_t t = (time_t)sp[1];
+                struct tm * lt = localtime(&t);
+                int64_t * out = (int64_t*)*sp;
+                if (lt) {
+                    out[0] = (int64_t)(lt->tm_year + 1900);
+                    out[1] = (int64_t)(lt->tm_mon + 1);
+                    out[2] = (int64_t)lt->tm_mday;
+                    out[3] = (int64_t)lt->tm_hour;
+                    out[4] = (int64_t)lt->tm_min;
+                    out[5] = (int64_t)lt->tm_sec;
+                    a = 0;
+                } else {
+                    a = -1;
+                }
+                break;
+            }
+#else
+            case I_LTIME: a = -1; break;
+#endif
             default:
                 printf("unknown instruction = %d! cycle = %d\n",
                     (int)i, (int)cycle);

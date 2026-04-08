@@ -1,21 +1,14 @@
+#ifndef __cx__
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <ctype.h>
-
-#if os(linux)
-#define CX_O_CREAT 64
-#define CX_O_TRUNC 512
-#endif
-#if os(apple)
-#define CX_O_CREAT 512
-#define CX_O_TRUNC 1024
-#endif
-#ifndef CX_O_CREAT
-#define CX_O_CREAT O_CREAT
-#define CX_O_TRUNC O_TRUNC
+#include <sys/stat.h>
+#include <dirent.h>
+#include <signal.h>
+#include <time.h>
 #endif
 
 static void cx_err(char * s) {
@@ -543,7 +536,7 @@ static int cmd_tee(int argc, char ** argv) {
     int nfds = 0;
     int i = 1;
     while (i < argc && nfds < 16 && !rc) {
-        fds[nfds] = open(argv[i], 1 | CX_O_CREAT | CX_O_TRUNC, 420);
+        fds[nfds] = open(argv[i], 1 | O_CREAT | O_TRUNC, 420);
         if (fds[nfds] < 0) {
             cx_err("tee: cannot open: ");
             cx_err(argv[i]);
@@ -1242,7 +1235,7 @@ static void cx_writes(int fd, char * s) {
 static int dir_exists(char * path) {
     int yes = 0;
     struct cx_stat st;
-    if (stat(path, &st) == 0) {
+    if (stat(path, (void*)&st) == 0) {
         if ((st.mode & S_IFMT) == S_IFDIR) {
             yes = 1;
         }
@@ -1284,7 +1277,7 @@ static int copy_file(char * src, char * dst) {
         rc = -1;
     }
     if (!rc) {
-        int dfd = open(dst, 1 | CX_O_CREAT | CX_O_TRUNC, 420);
+        int dfd = open(dst, 1 | O_CREAT | O_TRUNC, 420);
         if (dfd < 0) {
             close(sfd);
             rc = -1;
@@ -1306,18 +1299,18 @@ static int copy_file(char * src, char * dst) {
 static int rm_recursive(char * path) {
     int rc = 0;
     struct cx_stat st;
-    if (stat(path, &st) != 0) {
+    if (stat(path, (void*)&st) != 0) {
         rc = -1;
     }
     if (!rc && (st.mode & S_IFMT) == S_IFDIR) {
         char * names = (char*)malloc(64 * 256);
         int ncount = 0;
-        int dp = opendir(path);
+        void * dp = opendir(path);
         if (dp == 0) {
             rc = -1;
         }
         if (!rc) {
-            char * name = readdir(dp);
+            char * name = (char*)readdir(dp);
             while (name && ncount < 64) {
                 if (strcmp(name, ".") != 0 &&
                     strcmp(name, "..") != 0) {
@@ -1327,7 +1320,7 @@ static int rm_recursive(char * path) {
                         ncount++;
                     }
                 }
-                name = readdir(dp);
+                name = (char*)readdir(dp);
             }
             closedir(dp);
             int i = 0;
@@ -1380,7 +1373,7 @@ static int cmd_touch(int argc, char ** argv) {
     int rc = 0;
     int i = 1;
     while (i < argc && !rc) {
-        int fd = open(argv[i], 1 | CX_O_CREAT, 420);
+        int fd = open(argv[i], 1 | O_CREAT, 420);
         if (fd < 0) {
             cx_err("touch: cannot create: ");
             cx_err(argv[i]);
@@ -1640,7 +1633,7 @@ static int cmd_install(int argc, char ** argv) {
                 tl++;
             }
             memcpy(path + tl, cmds[i].name, nl + 1);
-            int fd = open(path, 1 | CX_O_CREAT | CX_O_TRUNC, 493);
+            int fd = open(path, 1 | O_CREAT | O_TRUNC, 493);
             if (fd < 0) {
                 cx_err("install: cannot write: ");
                 cx_err(path);
@@ -1684,7 +1677,7 @@ static int cmd_ls(int argc, char ** argv) {
     if (i < argc) {
         dir = argv[i];
     }
-    int dp = opendir(dir);
+    void * dp = opendir(dir);
     if (dp == 0) {
         cx_err("ls: cannot open: ");
         cx_err(dir);
@@ -1694,7 +1687,7 @@ static int cmd_ls(int argc, char ** argv) {
     if (!rc) {
         char * names = (char*)malloc(256 * 256);
         int ncount = 0;
-        char * name = readdir(dp);
+        char * name = (char*)readdir(dp);
         while (name && ncount < 256) {
             if (show_all || name[0] != '.') {
                 int nl = strlen(name);
@@ -1703,7 +1696,7 @@ static int cmd_ls(int argc, char ** argv) {
                     ncount++;
                 }
             }
-            name = readdir(dp);
+            name = (char*)readdir(dp);
         }
         closedir(dp);
         int x = 1;
@@ -1738,7 +1731,7 @@ static int cmd_ls(int argc, char ** argv) {
                 int nl2 = strlen(n);
                 memcpy(path + dl, n, nl2 + 1);
                 struct cx_stat st;
-                if (stat(path, &st) == 0) {
+                if (stat(path, (void*)&st) == 0) {
                     char ch = '-';
                     if ((st.mode & S_IFMT) == S_IFDIR) {
                         ch = 'd';
@@ -1761,7 +1754,7 @@ static int cmd_ls(int argc, char ** argv) {
 static int find_walk(char * path, char * name_pat, char tf) {
     int rc = 0;
     struct cx_stat st;
-    if (stat(path, &st) != 0) {
+    if (stat(path, (void*)&st) != 0) {
         rc = -1;
     }
     if (!rc) {
@@ -1794,11 +1787,11 @@ static int find_walk(char * path, char * name_pat, char tf) {
             cx_out("\n", 1);
         }
         if ((st.mode & S_IFMT) == S_IFDIR) {
-            int dp = opendir(path);
+            void * dp = opendir(path);
             if (dp != 0) {
                 char * names = (char*)malloc(64 * 256);
                 int n = 0;
-                char * name = readdir(dp);
+                char * name = (char*)readdir(dp);
                 while (name && n < 64) {
                     if (strcmp(name, ".") != 0 &&
                         strcmp(name, "..") != 0) {
@@ -1808,7 +1801,7 @@ static int find_walk(char * path, char * name_pat, char tf) {
                             n++;
                         }
                     }
-                    name = readdir(dp);
+                    name = (char*)readdir(dp);
                 }
                 closedir(dp);
                 int i = 0;
@@ -1920,13 +1913,13 @@ static int test_eval2(char * arg, char op) {
         }
     } else if (op == 'f') {
         struct cx_stat st;
-        if (stat(arg, &st) == 0 &&
+        if (stat(arg, (void*)&st) == 0 &&
             (st.mode & S_IFMT) == S_IFREG) {
             result = 0;
         }
     } else if (op == 'd') {
         struct cx_stat st;
-        if (stat(arg, &st) == 0 &&
+        if (stat(arg, (void*)&st) == 0 &&
             (st.mode & S_IFMT) == S_IFDIR) {
             result = 0;
         }
@@ -2355,11 +2348,11 @@ static int sh_exec_segment(int start, int end) {
         }
     }
     if (!rc && has_stdout) {
-        int flags = 1 | CX_O_CREAT;
+        int flags = 1 | O_CREAT;
         if (append_stdout) {
             flags = flags | O_APPEND;
         } else {
-            flags = flags | CX_O_TRUNC;
+            flags = flags | O_TRUNC;
         }
         int fd = open(stdout_path, flags, 420);
         if (fd < 0) {
@@ -2495,7 +2488,7 @@ static void sh_run_pipeline(int start, int end) {
             }
             if (s < sc - 1) {
                 int fd = open(tmps + s * 64,
-                    1 | CX_O_CREAT | CX_O_TRUNC, 420);
+                    1 | O_CREAT | O_TRUNC, 420);
                 if (fd >= 0) {
                     saved_out = dup2(1, 101);
                     dup2(fd, 1);

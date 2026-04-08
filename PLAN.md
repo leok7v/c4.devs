@@ -91,6 +91,18 @@ See STYLE.md for all coding conventions.
     isatty                — detect terminal
     dup2                  — redirect file descriptors
 
+### Missing memory primitive
+
+    realloc(ptr, size)    — grow/shrink an existing allocation
+
+Needed for any command that builds an unbounded buffer
+(sort's line array, sh's token table, grep -r's result
+list). Today these commands preallocate a fixed ceiling
+(64 tokens, 256 lines, etc.) and silently truncate. A
+single realloc intrinsic removes every one of those
+ceilings without touching individual commands. One line
+in the VM switch, one intrinsic() registration.
+
 ---
 
 ## Reference codebases
@@ -842,11 +854,38 @@ caching, warm VM reuse) is a Stage 6+ concern.
     kill    — needs kill() intrinsic
     ps      — needs /proc or sysctl, platform-specific
 
-**Performance:**
-- Bytecode caching: compile toy.c once, save bytecode
-  to build/toy.bc, reload on subsequent runs.
-- Warm VM: keep the VM alive across shell command
-  dispatches instead of respawning cx per command.
+**Bytecode executables (-o flag):**
+
+    cx -o hello hello.c
+
+Compile a source file once and write a self-executing
+bytecode file. Output format: a shebang line followed by
+the bytecode encoded as hex text (64 bytes per line) so
+the file remains a plain text artifact that any editor
+can display.
+
+    #!/usr/bin/env cx --exec
+    # cx bytecode v1
+    7f4358010000000000000000000000000000000000000000...
+    ...
+
+The first line is a shebang invoking cx in --exec mode,
+which decodes the hex back into the in-memory opcode
+stream and runs it directly without re-parsing the
+source. The hex envelope means:
+
+- Files are diffable, grep-able, copy-pasteable
+- chmod +x makes them runnable from any shell
+- No platform-specific binary format needed
+- Minimal cx code change (read+decode is straightforward)
+
+This is the chosen approach for distributing cx programs.
+Per-shell-spawn bytecode caching is explicitly NOT
+pursued - the executable file IS the cached bytecode.
+
+**Warm VM:** keep the VM alive across shell command
+dispatches instead of respawning cx per command (still
+worth doing for the shell's external command path).
 
 **Regex engine:**
 
