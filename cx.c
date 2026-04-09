@@ -2409,7 +2409,6 @@ char *preprocess(char *src, int srclen, char *out, char *filename, int depth) {
                 while (c < eol) { *o++ = *c++; }
                 *o++ = '\n';
             }
-            // output newline to preserve line count
             *o++ = '\n';
         } else if (pp_active()) {
             // regular line - perform macro substitution
@@ -2514,6 +2513,9 @@ char *preprocess(char *src, int srclen, char *out, char *filename, int depth) {
                     *o++ = *c++;
                 }
             }
+            *o++ = '\n';
+        } else {
+            // regular line, but not active - still output newline to preserve line numbering
             *o++ = '\n';
         }
         // advance to next line
