@@ -181,6 +181,15 @@ these may be used in `c4.c` itself. Remaining constraints:
 
 ---
 
+## Active Sub-Plans
+
+- [PLAN-R-to-L.md](PLAN-R-to-L.md) — switch `cx.c` parameter evaluation
+  from L-to-R to R-to-L (classic cdecl) so that a declared parameter's
+  stack offset is static and independent of caller arity. Prerequisite for
+  varargs; varargs itself is explicitly out of scope for that plan.
+
+---
+
 ## Future Plans
 
 ### Function Pointers

@@ -114,7 +114,7 @@ enum {
 enum {
     LEA, IMM, IMMD, IMMC, JMP, JSR, BZ, BNZ, ENT, ADJ, LEV, LI, LC, LI32, SI, SC, SI32,
     PSH, OR, XOR, AND, EQ, NE, LT, GT, LE, GE, SHL, SHR, ADD, SUB, MUL, DIV,
-    MOD, DUP, SPGET, SWAP, JSRI, MCPY, EXIT, PEEK, OFFSET, COFFSET
+    MOD, DUP, SPGET, SWAP, JSRI, MCPY, EXIT, PEEK, OFFSET, COFFSET, REVN
 };
 
 // intrinsics (system calls)
@@ -159,20 +159,26 @@ void next() {
                     opc = *++le;
                     if (opc < I_OPEN) {
                         printf("%8.4s",
-                            &"LEA ,IMM ,JMP ,JSR ,BZ  ,BNZ ,ENT ,ADJ ,"
+                            &"LEA ,IMM ,IMMD,IMMC,JMP ,JSR ,BZ  ,BNZ ,ENT ,ADJ ,"
                              "LEV ,LI  ,LC  ,LI32,SI  ,SC  ,SI32,PSH ,"
                              "OR  ,XOR ,AND ,EQ  ,NE  ,LT  ,GT  ,LE  ,"
                              "GE  ,SHL ,SHR ,ADD ,SUB ,MUL ,DIV ,MOD ,"
-                             "DUP ,SPGT,SWAP,JSRI,MCPY,EXIT,PEEK,"
+                             "DUP ,SPGT,SWAP,JSRI,MCPY,EXIT,PEEK,OFFS,COFF,"
+                             "REVN,"
                              [opc * 5]);
                     } else {
                         printf("%8.4s",
                             &"OPEN,READ,CLOS,PRTF,MALC,FREE,MSET,MCMP,"
                              "IEXT,WRIT,SYST,POPN,PCLS,FRED,IMCP,MMOV,"
-                             "SCPY,SCMP,SLEN,SCAT,SNCM,ASRT,ALCA,"
+                             "SCPY,SCMP,SLEN,SCAT,SNCM,ASRT,ALCA,MRED,"
+                             "MCLS,MWRT,LSEK,MMAP,MUNM,MSYN,FTRN,REN ,"
+                             "PUTS,IDIG,ISPC,IALP,TLOW,SCHR,SRCH,SSTR,"
+                             "ATOI,STAT,OPDR,RDDR,CLDR,UNLK,MKDR,RMDR,"
+                             "GCWD,CHDR,GENV,ACCS,CHMD,LINK,SLNK,DUP2,"
+                             "PIPE,TIME,LTME,SLEP,KILL,REAL,"
                              [(opc - I_OPEN) * 5]);
                     }
-                    if (opc <= ADJ) {
+                    if (opc <= ADJ || opc == REVN) {
                         printf(" %d\n", (int)*++le);
                     } else {
                         printf("\n");
@@ -901,12 +907,23 @@ void expression(int64_t lev) {
                     *++e = PSH;
                     ++t;
                 }
+                int64_t arg_count = 0;
                 while (tk != ')') {
                     expression(Assign);
                     *++e = PSH;
-                    ++t;
+                    arg_count = arg_count + 1;
                     skip_comma();
                 }
+                // For user calls, reverse the top arg_count stack entries
+                // at runtime so the callee sees R-to-L cdecl layout:
+                // first declared param nearest bp, independent of arity.
+                // Sys intrinsics read args as sp[n-1-i] and require
+                // L-to-R push order, so skip REVN for them.
+                if (arg_count > 1 && d[Class] != Sys) {
+                    *++e = REVN;
+                    *++e = arg_count;
+                }
+                t = t + arg_count;
                 next();
                 if (d[Class] == Sys) {
                     *++e = d[Val];
@@ -914,12 +931,8 @@ void expression(int64_t lev) {
                     *++e = JSR;
                     if (d[Val]) {
                         int64_t target = d[Val];
-                        int64_t offset = target - (int64_t)(e + 1);
-                        // Wait, d[Val] is absolute address (int64_t pointer).
-                        // e is int64_t pointer.
-                        // (target - (e+1)) in pointer arithmetic is slot count.
-                        // We want byte count.
-                        offset = (char *)target - (char *)(e + 1);
+                        int64_t offset =
+                            (char *)target - (char *)(e + 1);
                         *++e = offset;
                     } else {
                         *++e = 0; // target 0 means patch me
@@ -927,10 +940,6 @@ void expression(int64_t lev) {
                         fwd_patches[fwd_sp + 1] = (int64_t)e;
                         fwd_sp = fwd_sp + 2;
                     }
-                } else if (d[Class] == Fun) {
-                    *++e = IMMC;
-                    *++e = (char *)d[Val] - (char *)code_base;
-                    *++e = COFFSET;
                 } else if (d[Type] == FNPTR) {
                     if (d[Class] == Loc) {
                         *++e = LEA;
@@ -942,33 +951,32 @@ void expression(int64_t lev) {
                     }
                     *++e = LI;
                     *++e = JSRI;
-                    } else {
+                } else {
                     fatal("bad function call");
-                    }
-                    if (t) { *++e = ADJ; *++e = t; }
-                    ty = d[Type];
-                    if (ty == FNPTR) { ty = INT64; }
-                    } else if (d[Class] == Fun) {
-                    *++e = IMMC;
-                    *++e = d[Val] - (int64_t)code_base;
-                    *++e = COFFSET;
-                    ty = FNPTR;
-                    } else if (d[Class] == Num) {
-                    *++e = IMM;
-                    *++e = d[Val];
-                    ty = INT64;
-                    } else {
-                    if (d[Class] == Loc) {
+                }
+                if (t) { *++e = ADJ; *++e = t; }
+                ty = d[Type];
+                if (ty == FNPTR) { ty = INT64; }
+            } else if (d[Class] == Fun) {
+                *++e = IMMC;
+                *++e = (char *)d[Val] - (char *)code_base;
+                *++e = COFFSET;
+                ty = FNPTR;
+            } else if (d[Class] == Num) {
+                *++e = IMM;
+                *++e = d[Val];
+                ty = INT64;
+            } else {
+                if (d[Class] == Loc) {
                     *++e = LEA;
                     *++e = loc - d[Val];
-                    } else if (d[Class] == Glo) {
+                } else if (d[Class] == Glo) {
                     *++e = IMMD;
                     *++e = d[Val] - (int64_t)data_base;
                     *++e = OFFSET;
-                    } else {
+                } else {
                     fatal("undefined variable");
-                    }
-
+                }
                 ty = d[Type];
                 if (d[Extent] == -1) {
                     *++e = LI;
@@ -1590,7 +1598,7 @@ void statement() {
                         int64_t ssz = ((int64_t *)struct_syms[sty])[Val];
                         *++e = PSH;           // push src
                         *++e = LEA;
-                        *++e = loc - d[Val];  // dest address
+                    *++e = loc - d[Val];
                         *++e = PSH;           // push dest
                         *++e = SWAP;          // now: dest, src
                         *++e = IMM;
@@ -1601,7 +1609,7 @@ void statement() {
                         *++e = 3;
                     } else {
                         *++e = LEA;
-                        *++e = loc - d[Val];
+                    *++e = loc - d[Val];
                         *++e = PSH;
                         expression(Assign);
                         if (d[Type] == CHAR) {
@@ -1884,7 +1892,7 @@ void statement() {
                         int64_t ssz = ((int64_t *)struct_syms[sty])[Val];
                         *++e = PSH;
                         *++e = LEA;
-                        *++e = loc - d[Val];
+                    *++e = loc - d[Val];
                         *++e = PSH;
                         *++e = SWAP;
                         *++e = IMM;
@@ -1895,7 +1903,7 @@ void statement() {
                         *++e = 3;
                     } else {
                         *++e = LEA;
-                        *++e = loc - d[Val];
+                    *++e = loc - d[Val];
                         *++e = PSH;
                         expression(Assign);
                         if (d[Type] == CHAR) { *++e = SC;
@@ -2575,7 +2583,7 @@ int64_t *compile(char *filename) {
         return 0;
     }
     sym = sym_pool;
-    code_base = e = code_pool;
+    le = code_base = e = code_pool;
     if (!(data = data_base = malloc(poolsz * 8))) {
         printf("could not malloc(%d) data area\n", (int)(poolsz * 8));
         return 0;
@@ -2896,6 +2904,21 @@ int64_t *compile(char *filename) {
                         skip_comma();
                     }
                 }
+                // Reverse param Val so classic loc-d[Val] yields R-to-L
+                // static offsets. After this pass: first source param has
+                // Val = nparams-1, last has Val = 0. Locals haven't been
+                // declared yet, so no collisions.
+                {
+                    int64_t nparams = i;
+                    int64_t *pid = sym;
+                    while (pid[Tk]) {
+                        if (pid[Class] == Loc &&
+                            pid[Val] >= 0 && pid[Val] < nparams) {
+                            pid[Val] = (nparams - 1) - pid[Val];
+                        }
+                        pid = pid + Idsz;
+                    }
+                }
                 next();
                 if (tk == ';') { // forward declaration
                     id = sym; // unwind params
@@ -2951,8 +2974,11 @@ int64_t *compile(char *filename) {
                             int64_t param_slot = pid[Val];
                             i = i + slots;
                             int64_t local_slot = i;
-                            *++e = LEA; *++e = loc - local_slot; *++e = PSH;
-                            *++e = LEA; *++e = loc - param_slot;
+                            *++e = LEA;
+                            *++e = loc - local_slot;
+                            *++e = PSH;
+                            *++e = LEA;
+                            *++e = loc - pid[Val];
                             *++e = LI; *++e = PSH;  // deref param ptr
                             *++e = IMM; *++e = sz; *++e = PSH;
                             *++e = MCPY; *++e = ADJ; *++e = 3;
@@ -3117,7 +3143,7 @@ int64_t *compile(char *filename) {
                                 int64_t ssz = ss[Val];
                                 *++e = PSH;
                                 *++e = LEA;
-                                *++e = loc - d[Val];
+                    *++e = loc - d[Val];
                                 *++e = PSH;
                                 *++e = SWAP;
                                 *++e = IMM;
@@ -3128,7 +3154,7 @@ int64_t *compile(char *filename) {
                                 *++e = 3;
                             } else {
                                 *++e = LEA;
-                                *++e = loc - d[Val];
+                    *++e = loc - d[Val];
                                 *++e = PSH;
                                 expression(Assign);
                                 if (d[Type] == CHAR) {
@@ -3291,8 +3317,10 @@ int run(int64_t *pc_offset, int argc, char **argv) {
     sp = (int64_t *)((int64_t)stack_pool + poolsz);
     t = sp;
     *--sp = (int64_t)t;
-    *--sp = argc;
+    // R-to-L cdecl: push last declared param first (deepest), first last.
+    // main(argc, argv): argv pushed first, argc pushed second.
     *--sp = (int64_t)argv;
+    *--sp = argc;
     *--sp = -1; // return address marker
     bp = sp;    // main's ENT will push this, so main's bp+1 will point here.
     a = 0;
@@ -3307,7 +3335,8 @@ int run(int64_t *pc_offset, int argc, char **argv) {
                      "LEV ,LI  ,LC  ,LI32,SI  ,SC  ,SI32,PSH ,"
                      "OR  ,XOR ,AND ,EQ  ,NE  ,LT  ,GT  ,LE  ,"
                      "GE  ,SHL ,SHR ,ADD ,SUB ,MUL ,DIV ,MOD ,"
-                     "DUP ,SPGT,SWAP,JSRI,MCPY,EXIT,PEEK,OFFS,COFF,"[i * 5]);
+                     "DUP ,SPGT,SWAP,JSRI,MCPY,EXIT,PEEK,OFFS,COFF,"
+                     "REVN,"[i * 5]);
             } else {
                 printf("%d> %.4s", (int)cycle,
                     &"OPEN,READ,CLOS,PRTF,MALC,FREE,MSET,MCMP,"
@@ -3320,7 +3349,7 @@ int run(int64_t *pc_offset, int argc, char **argv) {
                      "PIPE,TIME,LTME,SLEP,KILL,REAL,"
                      [(i - I_OPEN) * 5]);
             }
-            if (i <= ADJ) {
+            if (i <= ADJ || i == REVN) {
                 printf(" %d\n", (int)*pc);
             } else {
                 printf("\n");
@@ -3372,6 +3401,20 @@ int run(int64_t *pc_offset, int argc, char **argv) {
             case OFFSET: a = (int64_t)data_base + a; break;
             case COFFSET: a = (int64_t)code_base + a; break;
             case JSRI: *--sp = (int64_t)((char *)pc - (char *)code_base); pc = (int64_t *)a; break;
+            case REVN: {
+                // Reverse top N stack entries (R-to-L cdecl for user calls).
+                int64_t n = *pc++;
+                int64_t lo = 0;
+                int64_t hi = n - 1;
+                while (lo < hi) {
+                    int64_t tmp = sp[lo];
+                    sp[lo] = sp[hi];
+                    sp[hi] = tmp;
+                    lo = lo + 1;
+                    hi = hi - 1;
+                }
+                break;
+            }
             case MCPY:
                 a = (int64_t)memcpy((char *)sp[2], (char *)sp[1], *sp); break;
             case EXIT:

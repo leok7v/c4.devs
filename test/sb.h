@@ -6,6 +6,13 @@
 #include <stdarg.h>
 #include <stdio.h>
 
+#ifdef __cx__
+typedef int64_t * va_list;
+#define va_start(ap, last) ap = va_start(&last)
+#define va_copy(dest, src) dest = va_copy(src)
+#define va_end(ap) va_end(ap)
+#endif
+
 struct sb {
     int count;
     int capacity;
@@ -38,8 +45,6 @@ static void sb_puts(struct sb * b, const char * s) {
 
 static void sb_putc(struct sb * b, char c) { sb_put(b, &c, 1); }
 
-#ifndef __cx__
-#error This should NOT be seen
 static void sb_printf(struct sb * b, const char * f, ...) {
     va_list ap;
     va_start(ap, f);
@@ -54,7 +59,6 @@ static void sb_printf(struct sb * b, const char * f, ...) {
     }
     va_end(ap);
 }
-#endif
 
 static void sb_free(struct sb * b) {
     free(b->data);
