@@ -91,9 +91,9 @@ See STYLE.md for all coding conventions.
     isatty                — detect terminal
     dup2                  — redirect file descriptors
 
-### Missing memory primitive
+### Memory primitive
 
-    realloc(ptr, size)    — grow/shrink an existing allocation
+    realloc(ptr, size)    — grow/shrink an existing allocation [DONE]
 
 Needed for any command that builds an unbounded buffer
 (sort's line array, sh's token table, grep -r's result
@@ -956,13 +956,14 @@ between platforms and cx code should not care.
 
 ## Milestone checklist
 
-    [ ] Stage 0 — foundation + tests pass
-    [ ] Stage 1 — 11 stream commands + tests pass
-    [ ] Stage 2 — 7 text processors + tests pass
-    [ ] Stage 3 — cx.c intrinsics batch 1 + tests pass
-    [ ] Stage 4 — 13 filesystem commands + tests pass
-    [ ] Stage 3b — cx.c intrinsics batch 2 + tests pass
-    [ ] Stage 5 — shell P0+P1 + tests pass
-    [ ] Stage 5 — self-hosting test passes
-    [ ] Stage 5b — shell P2 features + tests pass
-    [ ] Stage 6 — stretch goals as needed
+    [x] Stage 0 — foundation + tests pass
+    [x] Stage 1 — 11 stream commands + tests pass
+    [x] Stage 2 — 7 text processors + tests pass
+    [x] Stage 3 — cx.c intrinsics batch 1 + tests pass
+    [x] Stage 4 — 13 filesystem commands + tests pass
+    [x] Stage 3b — cx.c intrinsics batch 2 + tests pass
+    [x] Stage 5 — shell P0+P1 + tests pass
+    [x] Stage 5 — self-hosting test passes
+    [x] Stage 5b — shell P2 features + tests pass
+    [x] Stage 6 — stretch goals: realloc, find, xargs, test, which, date, sleep, kill
+    [ ] Stage 6 — stretch goals: ps, bytecode executables, warm VM, regex engine, full sed

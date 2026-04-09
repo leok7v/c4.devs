@@ -130,6 +130,7 @@ enum {
     I_CHMOD, I_LINK, I_SYMLNK,
     I_DUP2, I_PIPE,
     I_TIME, I_LTIME, I_SLEEP, I_KILL,
+    I_REALLOC,
     I_LAST
 };
 
@@ -493,6 +494,7 @@ void intrinsics() {
     intrinsic("localtime", I_LTIME);
     intrinsic("sleep", I_SLEEP);
     intrinsic("kill", I_KILL);
+    intrinsic("realloc", I_REALLOC);
 }
 
 void expect(int64_t t, char *s) { // expect token t and advance, else fatal
@@ -3280,7 +3282,12 @@ int run(int64_t *pc, int argc, char **argv) {
                 printf("%d> %.4s", (int)cycle,
                     &"OPEN,READ,CLOS,PRTF,MALC,FREE,MSET,MCMP,"
                      "IEXT,WRIT,SYST,POPN,PCLS,FRED,IMCP,MMOV,"
-                     "SCPY,SCMP,SLEN,SCAT,SNCM,ASRT,ALCA,"
+                     "SCPY,SCMP,SLEN,SCAT,SNCM,ASRT,ALCA,MRED,"
+                     "MCLS,MWRT,LSEK,MMAP,MUNM,MSYN,FTRN,REN ,"
+                     "PUTS,IDIG,ISPC,IALP,TLOW,SCHR,SRCH,SSTR,"
+                     "ATOI,STAT,OPDR,RDDR,CLDR,UNLK,MKDR,RMDR,"
+                     "GCWD,CHDR,GENV,ACCS,CHMD,LINK,SLNK,DUP2,"
+                     "PIPE,TIME,LTME,SLEP,KILL,REAL,"
                      [(i - I_OPEN) * 5]);
             }
             if (i <= ADJ) {
@@ -3451,6 +3458,7 @@ int run(int64_t *pc, int argc, char **argv) {
             case I_TIME: a = (int64_t)time(0); break;
             case I_SLEEP: a = sleep((int)*sp); break;
             case I_KILL: a = kill((int)sp[1], (int)*sp); break;
+            case I_REALLOC: a = (int64_t)realloc((void *)sp[1], *sp); break;
 #ifndef __cx__
             case I_LTIME: {
                 time_t t = (time_t)sp[1];

@@ -147,14 +147,8 @@ static void lines_init(struct lines * l) {
 
 static void lines_grow(struct lines * l) {
     int nc = l->cap * 2;
-    char ** nd = (char**)malloc(nc * sizeof(int));
-    int * nl = (int*)malloc(nc * sizeof(int));
-    memcpy(nd, l->data, l->count * sizeof(int));
-    memcpy(nl, l->lens, l->count * sizeof(int));
-    free(l->data);
-    free(l->lens);
-    l->data = nd;
-    l->lens = nl;
+    l->data = (char**)realloc(l->data, nc * sizeof(int));
+    l->lens = (int*)realloc(l->lens, nc * sizeof(int));
     l->cap = nc;
 }
 
@@ -2546,6 +2540,61 @@ static void sh_run_tokens(int start, int end) {
     }
 }
 
+static int cmd_date(int argc, char ** argv) {
+    int t = time(0);
+    int res[6];
+    if (localtime(t, res) == 0) {
+        cx_putint(1, res[0]);
+        cx_out("-", 1);
+        if (res[1] < 10) { cx_out("0", 1); }
+        cx_putint(1, res[1]);
+        cx_out("-", 1);
+        if (res[2] < 10) { cx_out("0", 1); }
+        cx_putint(1, res[2]);
+        cx_out(" ", 1);
+        if (res[3] < 10) { cx_out("0", 1); }
+        cx_putint(1, res[3]);
+        cx_out(":", 1);
+        if (res[4] < 10) { cx_out("0", 1); }
+        cx_putint(1, res[4]);
+        cx_out(":", 1);
+        if (res[5] < 10) { cx_out("0", 1); }
+        cx_putint(1, res[5]);
+        cx_out("\n", 1);
+        return 0;
+    }
+    return 1;
+}
+
+static int cmd_sleep(int argc, char ** argv) {
+    if (argc < 2) {
+        cx_err("sleep: missing operand\n");
+        return 1;
+    }
+    sleep(atoi(argv[1]));
+    return 0;
+}
+
+static int cmd_kill(int argc, char ** argv) {
+    if (argc < 2) {
+        cx_err("kill: missing operand\n");
+        return 1;
+    }
+    int sig = 15;
+    int pid = 0;
+    if (argc >= 3 && argv[1][0] == '-') {
+        sig = atoi(argv[1] + 1);
+        pid = atoi(argv[2]);
+    } else {
+        pid = atoi(argv[1]);
+    }
+    if (kill(pid, sig) != 0) {
+        cx_err("kill: failed\n");
+        return 1;
+    }
+    return 0;
+}
+
 static int cmd_sh(int argc, char ** argv) {
     char line[4096];
     int n = cx_getline(0, line, 4096);
@@ -2607,6 +2656,9 @@ static void setup(void) {
     cmd_reg("test", cmd_test);
     cmd_reg("[", cmd_test);
     cmd_reg("which", cmd_which);
+    cmd_reg("date", cmd_date);
+    cmd_reg("sleep", cmd_sleep);
+    cmd_reg("kill", cmd_kill);
     cmd_reg("sh", cmd_sh);
 }
 
