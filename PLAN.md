@@ -966,4 +966,5 @@ between platforms and cx code should not care.
     [x] Stage 5 — self-hosting test passes
     [x] Stage 5b — shell P2 features + tests pass
     [x] Stage 6 — stretch goals: realloc, find, xargs, test, which, date, sleep, kill
+    [x] Stage 6 — PIC and PID implementation (relative jumps and offsets)
     [ ] Stage 6 — stretch goals: ps, bytecode executables, warm VM, regex engine, full sed

@@ -36,9 +36,11 @@
 #endif
 
 char *p, *lp, // current position in source code
-     *data;   // data/bss pointer
+     *data,   // data/bss pointer
+     *data_base; // base address of data segment
 
 int64_t *e, *le,  // current position in emitted code
+    *code_base, // base address of code segment
     *id,      // currently parsed identifier
     *sym,     // symbol table (simple list of identifiers)
     *struct_syms, // struct type table (ID -> symbol entry)
@@ -110,9 +112,9 @@ enum {
 
 // opcodes (VM instructions)
 enum {
-    LEA, IMM, JMP, JSR, BZ, BNZ, ENT, ADJ, LEV, LI, LC, LI32, SI, SC, SI32,
+    LEA, IMM, IMMD, IMMC, JMP, JSR, BZ, BNZ, ENT, ADJ, LEV, LI, LC, LI32, SI, SC, SI32,
     PSH, OR, XOR, AND, EQ, NE, LT, GT, LE, GE, SHL, SHR, ADD, SUB, MUL, DIV,
-    MOD, DUP, SPGET, SWAP, JSRI, MCPY, EXIT, PEEK
+    MOD, DUP, SPGET, SWAP, JSRI, MCPY, EXIT, PEEK, OFFSET, COFFSET
 };
 
 // intrinsics (system calls)
@@ -628,8 +630,9 @@ void string_literal() {
     first = (char *)ival;
     next();
     if (tk != '"') {
-        *++e = IMM;
-        *++e = (int64_t)first;
+        *++e = IMMD;
+        *++e = (int64_t)first - (int64_t)data_base;
+        *++e = OFFSET;
         data = (char *)(((int64_t)data + sizeof(int64_t)) & -sizeof(int64_t));
     } else {
         n = 0;
@@ -646,8 +649,9 @@ void string_literal() {
             while (*src) { *dst++ = *src++; }
         }
         *dst++ = 0;
-        *++e = IMM;
-        *++e = (int64_t)result;
+        *++e = IMMD;
+        *++e = (int64_t)result - (int64_t)data_base;
+        *++e = OFFSET;
         data = (char *)(((int64_t)dst + sizeof(int64_t)) & -sizeof(int64_t));
     }
     ty = PTR;
@@ -691,13 +695,13 @@ void if_stmt() {
     b = ++e;
     statement();
     if (tk == Else) {
-        *b = (int64_t)(e + 3);
+        *b = (int64_t)((char *)(e + 3) - (char *)b);
         *++e = JMP;
         b = ++e;
         next();
         statement();
     }
-    *b = (int64_t)(e + 1);
+    *b = (int64_t)((char *)(e + 1) - (char *)b);
 }
 
 void while_stmt() {
@@ -713,13 +717,14 @@ void while_stmt() {
     saved_cnt_sp = cnt_sp;
     statement();
     *++e = JMP;
-    *++e = (int64_t)a;
-    *b = (int64_t)(e + 1);
+    int64_t offset = (int64_t)((char *)a - (char *)(e + 1));
+    *++e = offset;
+    *b = (int64_t)((char *)(e + 1) - (char *)b);
     j = saved_cnt_sp;
-    while (j < cnt_sp) { *(int64_t *)cnt_patches[j] = (int64_t)a; j = j + 1; }
+    while (j < cnt_sp) { *(int64_t *)cnt_patches[j] = (int64_t)((char *)a - (char *)cnt_patches[j]); j = j + 1; }
     j = saved_brk_sp;
     while (j < brk_sp) {
-        *(int64_t *)brk_patches[j] = (int64_t)(e + 1); j = j + 1;
+        *(int64_t *)brk_patches[j] = (int64_t)((char *)(e + 1) - (char *)brk_patches[j]); j = j + 1;
     }
     cnt_sp = saved_cnt_sp;
     brk_sp = saved_brk_sp;
@@ -746,13 +751,14 @@ void do_while_stmt() {
     expression(Comma);
     expect(')', "close paren expected");
     *++e = BNZ;
-    *++e = (int64_t)a;
+    int64_t offset = (int64_t)((char *)a - (char *)(e + 1));
+    *++e = offset;
     expect(';', "semicolon expected");
     j = saved_cnt_sp;
-    while (j < cnt_sp) { *(int64_t *)cnt_patches[j] = inc_top; j = j + 1; }
+    while (j < cnt_sp) { *(int64_t *)cnt_patches[j] = (int64_t)((char *)inc_top - (char *)cnt_patches[j]); j = j + 1; }
     j = saved_brk_sp;
     while (j < brk_sp) {
-        *(int64_t *)brk_patches[j] = (int64_t)(e + 1); j = j + 1;
+        *(int64_t *)brk_patches[j] = (int64_t)((char *)(e + 1) - (char *)brk_patches[j]); j = j + 1;
     }
     cnt_sp = saved_cnt_sp;
     brk_sp = saved_brk_sp;
@@ -769,7 +775,7 @@ void switch_stmt() {
     b = 0;
     while (tk != '}') {
         if (tk == Case) {
-            if (b) { *b = (int64_t)(e + 1); }
+            if (b) { *b = (int64_t)((char *)(e + 1) - (char *)b); }
             next();
             case_val = 0;
             if (tk == Num) {
@@ -788,7 +794,7 @@ void switch_stmt() {
             b = ++e;
             expect(':', "colon expected");
         } else if (tk == Default) {
-            if (b) { *b = (int64_t)(e + 1); }
+            if (b) { *b = (int64_t)((char *)(e + 1) - (char *)b); }
             next();
             expect(':', "colon expected");
             b = 0;
@@ -806,8 +812,11 @@ void switch_stmt() {
         }
     }
     next();
-    if (b) { *b = (int64_t)(e + 1); }
-    while (break_sp > break_stack) { **--break_sp = (int64_t)(e + 1); }
+    if (b) { *b = (int64_t)((char *)(e + 1) - (char *)b); }
+    while (break_sp > break_stack) { 
+        int64_t *patch = *--break_sp;
+        *patch = (int64_t)((char *)(e + 1) - (char *)patch);
+    }
     *++e = ADJ;
     *++e = 1;
 }
@@ -903,46 +912,63 @@ void expression(int64_t lev) {
                     *++e = d[Val];
                 } else if (d[Class] == Fun) {
                     *++e = JSR;
-                    *++e = d[Val];
-                    if (!d[Val]) {
+                    if (d[Val]) {
+                        int64_t target = d[Val];
+                        int64_t offset = target - (int64_t)(e + 1);
+                        // Wait, d[Val] is absolute address (int64_t pointer).
+                        // e is int64_t pointer.
+                        // (target - (e+1)) in pointer arithmetic is slot count.
+                        // We want byte count.
+                        offset = (char *)target - (char *)(e + 1);
+                        *++e = offset;
+                    } else {
+                        *++e = 0; // target 0 means patch me
                         fwd_patches[fwd_sp] = (int64_t)d;
                         fwd_patches[fwd_sp + 1] = (int64_t)e;
                         fwd_sp = fwd_sp + 2;
                     }
+                } else if (d[Class] == Fun) {
+                    *++e = IMMC;
+                    *++e = (char *)d[Val] - (char *)code_base;
+                    *++e = COFFSET;
                 } else if (d[Type] == FNPTR) {
                     if (d[Class] == Loc) {
                         *++e = LEA;
                         *++e = loc - d[Val];
                     } else if (d[Class] == Glo) {
-                        *++e = IMM;
-                        *++e = d[Val];
+                        *++e = IMMD;
+                        *++e = d[Val] - (int64_t)data_base;
+                        *++e = OFFSET;
                     }
                     *++e = LI;
                     *++e = JSRI;
-                } else {
+                    } else {
                     fatal("bad function call");
-                }
-                if (t) { *++e = ADJ; *++e = t; }
-                ty = d[Type];
-                if (ty == FNPTR) { ty = INT64; }
-            } else if (d[Class] == Fun) {
-                *++e = IMM;
-                *++e = d[Val];
-                ty = FNPTR;
-            } else if (d[Class] == Num) {
-                *++e = IMM;
-                *++e = d[Val];
-                ty = INT64;
-            } else {
-                if (d[Class] == Loc) {
-                    *++e = LEA;
-                    *++e = loc - d[Val];
-                } else if (d[Class] == Glo) {
+                    }
+                    if (t) { *++e = ADJ; *++e = t; }
+                    ty = d[Type];
+                    if (ty == FNPTR) { ty = INT64; }
+                    } else if (d[Class] == Fun) {
+                    *++e = IMMC;
+                    *++e = d[Val] - (int64_t)code_base;
+                    *++e = COFFSET;
+                    ty = FNPTR;
+                    } else if (d[Class] == Num) {
                     *++e = IMM;
                     *++e = d[Val];
-                } else {
+                    ty = INT64;
+                    } else {
+                    if (d[Class] == Loc) {
+                    *++e = LEA;
+                    *++e = loc - d[Val];
+                    } else if (d[Class] == Glo) {
+                    *++e = IMMD;
+                    *++e = d[Val] - (int64_t)data_base;
+                    *++e = OFFSET;
+                    } else {
                     fatal("undefined variable");
-                }
+                    }
+
                 ty = d[Type];
                 if (d[Extent] == -1) {
                     *++e = LI;
@@ -1238,18 +1264,18 @@ void expression(int64_t lev) {
                 d = ++e;
                 expression(Assign);
                 expect(':', "conditional missing colon");
-                *d = (int64_t)(e + 3);
+                *d = (int64_t)((char *)(e + 3) - (char *)d);
                 *++e = JMP;
                 d = ++e;
                 expression(Cond);
-                *d = (int64_t)(e + 1);
+                *d = (int64_t)((char *)(e + 1) - (char *)d);
                 break;
             case Lor:
                 next();
                 *++e = BNZ;
                 d = ++e;
                 expression(Lan);
-                *d = (int64_t)(e + 1);
+                *d = (int64_t)((char *)(e + 1) - (char *)d);
                 ty = INT64;
                 break;
             case Lan:
@@ -1257,7 +1283,7 @@ void expression(int64_t lev) {
                 *++e = BZ;
                 d = ++e;
                 expression(Or);
-                *d = (int64_t)(e + 1);
+                *d = (int64_t)((char *)(e + 1) - (char *)d);
                 ty = INT64;
                 break;
             case Or:  binop(OR, Xor);   break;
@@ -1429,15 +1455,16 @@ void statement() {
             e = e + inc_len;
         }
         *++e = JMP;
-        *++e = (int64_t)a;
-        *b = (int64_t)(e + 1);
+        int64_t offset = (int64_t)((char *)a - (char *)(e + 1));
+        *++e = offset;
+        *b = (int64_t)((char *)(e + 1) - (char *)b);
         int64_t j = saved_cnt_sp;
         while (j < cnt_sp) {
-            *(int64_t *)cnt_patches[j] = inc_top; j = j + 1;
+            *(int64_t *)cnt_patches[j] = (int64_t)((char *)inc_top - (char *)cnt_patches[j]); j = j + 1;
         }
         j = saved_brk_sp;
         while (j < brk_sp) {
-            *(int64_t *)brk_patches[j] = (int64_t)(e + 1); j = j + 1;
+            *(int64_t *)brk_patches[j] = (int64_t)((char *)(e + 1) - (char *)brk_patches[j]); j = j + 1;
         }
         cnt_sp = saved_cnt_sp;
         brk_sp = saved_brk_sp;
@@ -2546,8 +2573,8 @@ int64_t *compile(char *filename) {
         return 0;
     }
     sym = sym_pool;
-    le = e = code_pool;
-    if (!(data = malloc(poolsz * 8))) {
+    code_base = e = code_pool;
+    if (!(data = data_base = malloc(poolsz * 8))) {
         printf("could not malloc(%d) data area\n", (int)(poolsz * 8));
         return 0;
     }
@@ -2898,7 +2925,8 @@ int64_t *compile(char *filename) {
                 j = 0;
                 while (j < fwd_sp) {
                     if (fwd_patches[j] == (int64_t)d) {
-                        *(int64_t *)fwd_patches[j + 1] = d[Val];
+                        int64_t *patch_addr = (int64_t *)fwd_patches[j + 1];
+                        *patch_addr = (char *)d[Val] - (char *)patch_addr;
                     }
                     j = j + 2;
                 }
@@ -3252,19 +3280,19 @@ int64_t *compile(char *filename) {
         printf("main() not defined\n");
         return 0;
     }
-    return (int64_t *)idmain[Val];
+    return (int64_t *)((char *)idmain[Val] - (char *)code_base);
 }
 
-int run(int64_t *pc, int argc, char **argv) {
-    int64_t *sp, *bp, *t, a, cycle;
+int run(int64_t *pc_offset, int argc, char **argv) {
+    int64_t *sp, *bp, *t, *pc, a, cycle;
+    pc = (int64_t *)((char *)code_base + (int64_t)pc_offset);
     sp = (int64_t *)((int64_t)stack_pool + poolsz);
-    bp = sp;
-    *--sp = EXIT; // call exit if main returns
-    *--sp = PSH;
     t = sp;
+    *--sp = (int64_t)t;
     *--sp = argc;
     *--sp = (int64_t)argv;
-    *--sp = (int64_t)t;
+    *--sp = -1; // return address marker
+    bp = sp;    // main's ENT will push this, so main's bp+1 will point here.
     a = 0;
     cycle = 0;
     while (1) {
@@ -3273,11 +3301,11 @@ int run(int64_t *pc, int argc, char **argv) {
         if (debug) {
             if (i < I_OPEN) {
                 printf("%d> %.4s", (int)cycle,
-                    &"LEA ,IMM ,JMP ,JSR ,BZ  ,BNZ ,ENT ,ADJ ,"
+                    &"LEA ,IMM ,IMMD,IMMC,JMP ,JSR ,BZ  ,BNZ ,ENT ,ADJ ,"
                      "LEV ,LI  ,LC  ,LI32,SI  ,SC  ,SI32,PSH ,"
                      "OR  ,XOR ,AND ,EQ  ,NE  ,LT  ,GT  ,LE  ,"
                      "GE  ,SHL ,SHR ,ADD ,SUB ,MUL ,DIV ,MOD ,"
-                     "DUP ,SPGT,SWAP,JSRI,MCPY,EXIT,PEEK,"[i * 5]);
+                     "DUP ,SPGT,SWAP,JSRI,MCPY,EXIT,PEEK,OFFS,COFF,"[i * 5]);
             } else {
                 printf("%d> %.4s", (int)cycle,
                     &"OPEN,READ,CLOS,PRTF,MALC,FREE,MSET,MCMP,"
@@ -3299,15 +3327,19 @@ int run(int64_t *pc, int argc, char **argv) {
         switch (i) {
             case LEA:  a = (int64_t)(bp + *pc++); break;
             case IMM:  a = *pc++; break;
-            case JMP:  pc = (int64_t *)*pc; break;
-            case JSR:  *--sp = (int64_t)(pc + 1); pc = (int64_t *)*pc; break;
-            case BZ:   pc = a ? pc + 1 : (int64_t *)*pc; break;
-            case BNZ:  pc = a ? (int64_t *)*pc : pc + 1; break;
+            case IMMD: a = *pc++; break;
+            case IMMC: a = *pc++; break;
+            case JMP:  pc = (int64_t *)((char *)pc + *pc); break;
+            case JSR:  *--sp = (int64_t)((char *)(pc + 1) - (char *)code_base); pc = (int64_t *)((char *)pc + *pc); break;
+            case BZ:   pc = a ? pc + 1 : (int64_t *)((char *)pc + *pc); break;
+            case BNZ:  pc = a ? (int64_t *)((char *)pc + *pc) : pc + 1; break;
             case ENT:  *--sp = (int64_t)bp; bp = sp; sp = sp - *pc++; break;
             case ADJ:  sp = sp + *pc++; break;
             case LEV:
                 sp = bp; bp = (int64_t *)*sp++;
-                pc = (int64_t *)*sp++; break;
+                int64_t ret_addr = *sp++;
+                if (ret_addr == -1) return a;
+                pc = (int64_t *)((char *)code_base + ret_addr); break;
             case LI:   a = *(int64_t *)a; break;
             case LC:   a = *(char *)a; break;
             case LI32: a = *(int32_t *)a; break;
@@ -3335,7 +3367,9 @@ int run(int64_t *pc, int argc, char **argv) {
             case SPGET: a = (int64_t)sp; break;
             case SWAP: a = sp[0]; sp[0] = sp[1]; sp[1] = a; break;
             case PEEK: a = *sp; break;
-            case JSRI: *--sp = (int64_t)pc; pc = (int64_t *)a; break;
+            case OFFSET: a = (int64_t)data_base + a; break;
+            case COFFSET: a = (int64_t)code_base + a; break;
+            case JSRI: *--sp = (int64_t)((char *)pc - (char *)code_base); pc = (int64_t *)a; break;
             case MCPY:
                 a = (int64_t)memcpy((char *)sp[2], (char *)sp[1], *sp); break;
             case EXIT:
