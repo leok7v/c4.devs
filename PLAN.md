@@ -968,4 +968,15 @@ between platforms and cx code should not care.
     [x] Stage 5b — shell P2 features + tests pass
     [x] Stage 6 — stretch goals: realloc, find, xargs, test, which, date, sleep, kill
     [x] Stage 6 — PIC and PID implementation (relative jumps and offsets)
+    [x] cx self-hosts cleanly — test/tests.c runs every test twice (native
+        and cx-on-cx), 45/45 passing on both paths. See MEMORY.md for the
+        five bugs that had to be fixed to get here.
     [ ] Stage 6 — stretch goals: ps, bytecode executables, warm VM, regex engine, full sed
+
+---
+
+## Progress log
+
+See `MEMORY.md` — timestamped entries for each checkpoint landed against
+this plan. New work goes on top; each entry cites the commit(s) that
+implemented it.

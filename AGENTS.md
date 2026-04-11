@@ -140,17 +140,29 @@ int64_t format warnings), runs struct tests, io, self-compilation.
 
 ## Self-Compilation Constraints
 
-`c4.c` must be valid c4 input. Now that c4 supports `for`/`do`/`break`/`continue`/`switch`,
-these may be used in `c4.c` itself. Remaining constraints:
+`cx.c` must be valid cx input. cx supports `for`/`do`/`break`/`continue`/
+`switch`, mid-block declarations, typedefs, unions, function pointers,
+variadics, and a cpp-style preprocessor, so most modern C is fair game.
+As of 2026-04-11 cx self-hosts the full 45-test suite end-to-end
+(`build/cx cx.c test/tests.c`) — see MEMORY.md for the fixes that got us
+there. Still, a few sharp edges remain:
 
-- **No forward references to globals** — declare before use
-- **No mid-block variable declarations** — all locals at top of function or block
-- **No `#define` macros** — c4 treats `#` as comment-to-EOL
-- **No `unsigned`, `float`, `double`** — not implemented
-- **No `&&` or `||` in variable declarations** — short-circuit not valid at decl site
-- **`int` = `int64_t` (8 bytes)** — use `(int)` casts for printf `%d`
-- **printf max 5 data arguments** — format + up to 5 values (6 total)
-- **Always verify after changes**: `timeout 10 ./build/c4 c4.c test/struct_simple.c`
+- **No forward references to globals** — declare before use.
+- **Don't stack case labels** — cx's C4-style switch re-checks the
+  scrutinee at every `case`, so `case A: case B:` runs the body only for
+  `B`. Split into two cases (optionally sharing a helper function).
+- **Don't rely on `break;` inside a braced `{ ... }` in a switch case
+  reaching the switch** — that path now works, but new control-flow
+  additions should keep this pattern in mind; when in doubt, test under
+  self-host with `build/cx cx.c test/tests.c`.
+- **Local shadowing of non-zero globals works**, but only because the
+  function prologue now assigns `id[Val] = i` unconditionally — watch
+  this if you rework local-variable allocation.
+- **No `unsigned`, `float`, `double`** — not implemented.
+- **`int` = `int64_t` (8 bytes)** — use `(int)` casts for printf `%d`.
+- **Always verify after changes to cx.c**:
+  `cc -Wall -Wpedantic -o build/cx cx.c && build/cx cx.c test/tests.c`
+  (runs every test natively *and* through self-hosted cx).
 
 ---
 
