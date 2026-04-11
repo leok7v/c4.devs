@@ -1951,7 +1951,8 @@ char* mem_read(const char* filename) {
             metadata[0] = (int64_t)file_descriptor;
             metadata[1] = total_size;
             
-            read(file_descriptor, mapped_memory + 16, file_size);
+            ssize_t nread = read(file_descriptor, mapped_memory + 16, file_size);
+            (void)nread;
             return_ptr = (char*)(mapped_memory + 16);
         }
         
