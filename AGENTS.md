@@ -181,12 +181,74 @@ these may be used in `c4.c` itself. Remaining constraints:
 
 ---
 
-## Active Sub-Plans
+## Calling Convention (R-to-L cdecl)
 
-- [PLAN-R-to-L.md](PLAN-R-to-L.md) — switch `cx.c` parameter evaluation
-  from L-to-R to R-to-L (classic cdecl) so that a declared parameter's
-  stack offset is static and independent of caller arity. Prerequisite for
-  varargs; varargs itself is explicitly out of scope for that plan.
+`cx.c` uses classic right-to-left cdecl parameter passing: the last
+declared parameter is pushed deepest on the stack, the first declared
+parameter ends up closest to `bp`. This means a named parameter's stack
+offset is **static** — it depends only on the parameter's declaration
+index, never on the caller's arity. For `f(a0, a1, ..., aN-1)`:
+
+```
+    bp[0]    = saved bp
+    bp[1]    = return address
+    bp[2]    = a0         <-- first declared, static offset
+    bp[3]    = a1
+    ...
+    bp[1+N]  = a(N-1)     <-- last declared
+    bp[-1]   = local_0
+    ...
+```
+
+Because cx's single-pass parser reads arguments left-to-right, the
+compiler emits arg pushes in source order and then issues a single
+`REVN N` opcode that reverses the top N stack entries **at runtime**,
+immediately before `JSR`. Sys intrinsics bypass `REVN` — their VM
+handlers read args with L-to-R indexing (`sp[n-1-i]`), matching the
+emit order. `run()` hand-builds `main`'s frame with `argv` pushed
+first, `argc` second, so `bp[2] = argc`, `bp[3] = argv`.
+
+The param-reversal is implemented as a post-parse pass over the symbol
+table: during parsing, `id[Val] = i++` assigns 0..N-1 in source order;
+after `)` is consumed, a sweep flips them to `(N-1) - Val`, so classic
+`loc - d[Val]` LEA emission yields the R-to-L offsets above.
+
+## Varargs (`...`, `va_start`, `va_end`, `va_copy`, `vsnprintf`)
+
+Static named-param offsets make varargs nearly trivial:
+
+- **`...`** — new `Ellipsis` token (produced by `next()` on three `.`s).
+  The function-parameter loop consumes it as the end-of-params marker;
+  no flag on the symbol. Caller pushes everything normally.
+- **`va_list`** — user code `typedef`s it as `int64_t *`. Every stack
+  slot is 8 bytes, so `va_arg` is just `*ap++` (no per-type stride).
+- **`va_start(&last)`** — Sys intrinsic `I_VSTRT`, VM handler
+  `a = *sp + 8;`. Returns the address of the first variadic slot, which
+  is one 8-byte slot past the address of the last named param.
+- **`va_end(ap)`** — Sys intrinsic `I_VEND`, no-op.
+- **`va_copy(src)`** — Sys intrinsic `I_VCPY`, returns its arg unchanged
+  (pointers copy trivially).
+- **`vsnprintf(buf, n, fmt, ap)`** — Sys intrinsic `I_VSNPF`, dispatches
+  to the `cx_vsnprintf` helper in `cx.c`. That helper walks the format
+  string and hands each `%…` conversion to host `snprintf` with a
+  rebuilt single-spec format, forcing an `ll` length modifier for
+  integer conversions so cx's int64 slots format correctly.
+
+Standard user pattern (see `test/sb.h`):
+
+```c
+#ifdef __cx__
+typedef int64_t * va_list;
+#define va_start(ap, last) ap = va_start(&last)
+#define va_copy(dest, src) dest = va_copy(src)
+#define va_end(ap) va_end(ap)
+#endif
+```
+
+The recursive-looking macro body is safe because cx's preprocessor
+does strict single-pass substitution with no rescan: the inner
+`va_start(&last)` in the body is written to the output as-is, where
+the main parser then resolves it to the Sys intrinsic.
 
 ---
 

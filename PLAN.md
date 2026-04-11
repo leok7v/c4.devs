@@ -3,11 +3,6 @@
 A single `toy.c` file compiled by cx that provides Unix
 commands and a minimal shell. Invoked as:
 
-> **Active sub-plan:** [PLAN-R-to-L.md](PLAN-R-to-L.md) — switch parameter
-> evaluation order in `cx.c` from L-to-R to R-to-L. Prerequisite for future
-> varargs work. Recovers from a broken half-finished prior attempt.
-
-
     ./build/cx toy.c <command> [args...]
 
 Or via wrapper scripts in ./bin:
