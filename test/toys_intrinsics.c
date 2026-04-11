@@ -44,7 +44,7 @@ int main(void) {
     } else {
         bad("stat: directory recognized");
     }
-    int fd = open(file, 1 | 0x200 | 0x400, 420);
+    int fd = open(file, O_WRONLY | O_CREAT | O_TRUNC, 420);
     if (fd >= 0) {
         write(fd, payload, payload_len);
         close(fd);
