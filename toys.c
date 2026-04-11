@@ -16,22 +16,16 @@
 #include <stdint.h>
 #endif
 
-#ifdef __cx__
-typedef int64_t * va_list;
-#define va_start(ap, last) ap = va_start(&last)
-#define va_copy(dest, src) dest = va_copy(src)
-#define va_end(ap) va_end(ap)
+#ifndef S_ISDIR
 #define S_ISDIR(m) (((m) & S_IFMT) == S_IFDIR)
+#endif
+#ifndef S_ISREG
 #define S_ISREG(m) (((m) & S_IFMT) == S_IFREG)
 #endif
 
 static void cx_write(int fd, const void * buf, int n) {
-#ifndef __cx__
     int r = (int)write(fd, buf, n);
     (void)r;
-#else
-    write(fd, buf, n);
-#endif
 }
 
 static void cx_err(char * s) {
