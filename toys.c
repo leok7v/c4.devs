@@ -228,6 +228,7 @@ typedef int (*cmd_fn)(int, char **);
 struct cmd {
     char * name;
     cmd_fn fn;
+    char * help;
 };
 
 struct cmd cmds[64];
@@ -848,6 +849,10 @@ static int cmd_cut(int argc, char ** argv) {
     int field = 1;
     int i = 1;
     while (i < argc && argv[i][0] == '-') {
+        if (strcmp(argv[i], "--") == 0) {
+            i++;
+            break;
+        }
         if (argv[i][1] == 'd') {
             if (argv[i][2]) {
                 delim = argv[i][2];
@@ -943,7 +948,11 @@ static int cmd_grep(int argc, char ** argv) {
     int flags = 0;
     int i = 1;
     while (i < argc && argv[i][0] == '-') {
-        flags |= grep_parse_flags(argv[i]);
+        if (strcmp(argv[i], "--") == 0) {
+            i++;
+            break;
+        }
+        flags = flags | grep_parse_flags(argv[i]);
         i++;
     }
     if (i >= argc) {
@@ -1106,6 +1115,10 @@ static int cmd_uniq(int argc, char ** argv) {
     int show_count = 0;
     int i = 1;
     while (i < argc && argv[i][0] == '-') {
+        if (strcmp(argv[i], "--") == 0) {
+            i++;
+            break;
+        }
         if (argv[i][1] == 'c') {
             show_count = 1;
         }
@@ -1142,6 +1155,10 @@ static int cmd_sort(int argc, char ** argv) {
     int reverse = 0;
     int i = 1;
     while (i < argc && argv[i][0] == '-') {
+        if (strcmp(argv[i], "--") == 0) {
+            i++;
+            break;
+        }
         if (argv[i][1] == 'r') {
             reverse = 1;
         }
@@ -1425,6 +1442,10 @@ static int cmd_mkdir(int argc, char ** argv) {
     int parents = 0;
     int i = 1;
     while (i < argc && argv[i][0] == '-') {
+        if (strcmp(argv[i], "--") == 0) {
+            i++;
+            break;
+        }
         if (argv[i][1] == 'p') {
             parents = 1;
         }
@@ -1469,6 +1490,10 @@ static int cmd_rm(int argc, char ** argv) {
     int force = 0;
     int i = 1;
     while (i < argc && argv[i][0] == '-') {
+        if (strcmp(argv[i], "--") == 0) {
+            i++;
+            break;
+        }
         char * f = argv[i] + 1;
         while (*f) {
             if (*f == 'r' || *f == 'R') {
@@ -1542,6 +1567,10 @@ static int cmd_ln(int argc, char ** argv) {
     int symbolic = 0;
     int i = 1;
     while (i < argc && argv[i][0] == '-') {
+        if (strcmp(argv[i], "--") == 0) {
+            i++;
+            break;
+        }
         if (argv[i][1] == 's') {
             symbolic = 1;
         }
@@ -1694,6 +1723,10 @@ static int cmd_ls(int argc, char ** argv) {
     int long_fmt = 0;
     int i = 1;
     while (i < argc && argv[i][0] == '-') {
+        if (strcmp(argv[i], "--") == 0) {
+            i++;
+            break;
+        }
         char * f = argv[i] + 1;
         while (*f) {
             if (*f == 'a') {
@@ -2091,6 +2124,7 @@ int64_t sh_tok_types[64];
 int sh_tok_count = 0;
 char sh_var_names[4096];
 char sh_var_vals[16384];
+char sh_var_exported[64];
 int sh_var_count = 0;
 int sh_last_rc = 0;
 char sh_expanded[16384];
@@ -2131,7 +2165,20 @@ static void sh_set_var(char * name, char * value) {
     if (!found && sh_var_count < 64) {
         strcpy(sh_var_names + sh_var_count * 64, name);
         strcpy(sh_var_vals + sh_var_count * 256, value);
+        sh_var_exported[sh_var_count] = 0;
         sh_var_count++;
+    }
+}
+
+static void sh_export_var(char * name) {
+    int i = 0;
+    int found = 0;
+    while (i < sh_var_count && !found) {
+        if (strcmp(sh_var_names + i * 64, name) == 0) {
+            sh_var_exported[i] = 1;
+            found = 1;
+        }
+        i++;
     }
 }
 
@@ -2269,7 +2316,44 @@ static void sh_expand_word(char * src, char * dst, int max) {
 
 static void sh_run_tokens(int start, int end);
 
+static int cmd_sh_set(int argc, char ** argv) {
+    int i = 0;
+    while (i < sh_var_count) {
+        cx_puts(sh_var_names + i * 64);
+        cx_out("=", 1);
+        cx_puts(sh_var_vals + i * 256);
+        cx_out("\n", 1);
+        i++;
+    }
+    return 0;
+}
+
+static int cmd_sh_export(int argc, char ** argv) {
+    if (argc < 2) {
+        int i = 0;
+        while (i < sh_var_count) {
+            if (sh_var_exported[i]) {
+                cx_err("export ");
+                cx_err(sh_var_names + i * 64);
+                cx_err("=");
+                cx_err(sh_var_vals + i * 256);
+                cx_err("\n");
+            }
+            i++;
+        }
+        return 0;
+    }
+    int j = 1;
+    while (j < argc) {
+        sh_export_var(argv[j]);
+        j++;
+    }
+    return 0;
+}
+
 static cmd_fn sh_find_cmd(char * name) {
+    if (strcmp(name, "set") == 0) return cmd_sh_set;
+    if (strcmp(name, "export") == 0) return cmd_sh_export;
     cmd_fn result = 0;
     int i = 0;
     while (i < ncmds && !result) {
@@ -2281,12 +2365,26 @@ static cmd_fn sh_find_cmd(char * name) {
     return result;
 }
 
+static void sh_sync_env(struct sb * b) {
+    int i = 0;
+    while (i < sh_var_count) {
+        if (sh_var_exported[i]) {
+            sb_puts(b, sh_var_names + i * 64);
+            sb_putc(b, '=');
+            sb_puts(b, sh_var_vals + i * 256);
+            sb_putc(b, ' ');
+        }
+        i++;
+    }
+}
+
 static int sh_run_external(int argc, char ** argv) {
     struct sb sb_cmd;
     memset(&sb_cmd, 0, sizeof(struct sb));
+    sh_sync_env(&sb_cmd);
     int j = 0;
     while (j < argc) {
-        if (j > 0) { sb_putc(&sb_cmd, ' '); }
+        if (j > 0 || sb_cmd.count > 0) { sb_putc(&sb_cmd, ' '); }
         sb_puts(&sb_cmd, argv[j]);
         j++;
     }
@@ -2426,11 +2524,17 @@ static int sh_exec_segment(int start, int end) {
             handled = 1;
         }
         if (!handled && argc > 0) {
-            cmd_fn fn = sh_find_cmd(argv[0]);
+            char ** actual_argv = argv;
+            int actual_argc = argc;
+            if (argc > 1 && strcmp(argv[0], "--") == 0) {
+                actual_argv = argv + 1;
+                actual_argc = argc - 1;
+            }
+            cmd_fn fn = sh_find_cmd(actual_argv[0]);
             if (fn) {
-                rc = fn(argc, argv);
+                rc = fn(actual_argc, actual_argv);
             } else {
-                rc = sh_run_external(argc, argv);
+                rc = sh_run_external(actual_argc, actual_argv);
             }
         }
     }
@@ -2655,68 +2759,71 @@ static int cmd_sh(int argc, char ** argv) {
     return sh_last_rc;
 }
 
-static void cmd_reg(char * name, cmd_fn fn) {
+static void cmd_reg(char * name, cmd_fn fn, char * help) {
     cmds[ncmds].name = name;
     cmds[ncmds].fn = fn;
+    cmds[ncmds].help = help;
     ncmds++;
 }
 
 static void setup(void) {
-    cmd_reg("true", cmd_true);
-    cmd_reg("false", cmd_false);
-    cmd_reg("echo", cmd_echo);
-    cmd_reg("yes", cmd_yes);
-    cmd_reg("basename", cmd_basename);
-    cmd_reg("dirname", cmd_dirname);
-    cmd_reg("seq", cmd_seq);
-    cmd_reg("cat", cmd_cat);
-    cmd_reg("head", cmd_head);
-    cmd_reg("tail", cmd_tail);
-    cmd_reg("wc", cmd_wc);
-    cmd_reg("tee", cmd_tee);
-    cmd_reg("rev", cmd_rev);
-    cmd_reg("tac", cmd_tac);
-    cmd_reg("nl", cmd_nl);
-    cmd_reg("fold", cmd_fold);
-    cmd_reg("expand", cmd_expand);
-    cmd_reg("paste", cmd_paste);
-    cmd_reg("tr", cmd_tr);
-    cmd_reg("cut", cmd_cut);
-    cmd_reg("grep", cmd_grep);
-    cmd_reg("sed", cmd_sed);
-    cmd_reg("uniq", cmd_uniq);
-    cmd_reg("sort", cmd_sort);
-    cmd_reg("printf", cmd_printf);
-    cmd_reg("pwd", cmd_pwd);
-    cmd_reg("touch", cmd_touch);
-    cmd_reg("mkdir", cmd_mkdir);
-    cmd_reg("rmdir", cmd_rmdir);
-    cmd_reg("rm", cmd_rm);
-    cmd_reg("cp", cmd_cp);
-    cmd_reg("mv", cmd_mv);
-    cmd_reg("ln", cmd_ln);
-    cmd_reg("chmod", cmd_chmod);
-    cmd_reg("cd", cmd_cd);
-    cmd_reg("env", cmd_env);
-    cmd_reg("install", cmd_install);
-    cmd_reg("ls", cmd_ls);
-    cmd_reg("find", cmd_find);
-    cmd_reg("xargs", cmd_xargs);
-    cmd_reg("test", cmd_test);
-    cmd_reg("[", cmd_test);
-    cmd_reg("which", cmd_which);
-    cmd_reg("date", cmd_date);
-    cmd_reg("sleep", cmd_sleep);
-    cmd_reg("kill", cmd_kill);
-    cmd_reg("sh", cmd_sh);
+    cmd_reg("true", cmd_true, "true");
+    cmd_reg("false", cmd_false, "false");
+    cmd_reg("echo", cmd_echo, "echo [-n] [ARGS...]");
+    cmd_reg("yes", cmd_yes, "yes [STRING]");
+    cmd_reg("basename", cmd_basename, "basename PATH [SUFFIX]");
+    cmd_reg("dirname", cmd_dirname, "dirname PATH");
+    cmd_reg("seq", cmd_seq, "seq [FIRST] [INCR] LAST");
+    cmd_reg("cat", cmd_cat, "cat [FILE...]");
+    cmd_reg("head", cmd_head, "head [-n N] [FILE...]");
+    cmd_reg("tail", cmd_tail, "tail [-n N] [FILE...]");
+    cmd_reg("wc", cmd_wc, "wc [-lwm] [FILE...]");
+    cmd_reg("tee", cmd_tee, "tee [-a] [FILE...]");
+    cmd_reg("rev", cmd_rev, "rev [FILE...]");
+    cmd_reg("tac", cmd_tac, "tac [FILE...]");
+    cmd_reg("nl", cmd_nl, "nl [FILE...]");
+    cmd_reg("fold", cmd_fold, "fold [-w WIDTH] [FILE...]");
+    cmd_reg("expand", cmd_expand, "expand [-t TAB] [FILE...]");
+    cmd_reg("paste", cmd_paste, "paste [-d DELIM] [FILE...]");
+    cmd_reg("tr", cmd_tr, "tr SET1 SET2");
+    cmd_reg("cut", cmd_cut, "cut -d DELIM -f FIELD [FILE...]");
+    cmd_reg("grep", cmd_grep, "grep [-ivcn] PATTERN [FILE...]");
+    cmd_reg("sed", cmd_sed, "sed s/OLD/NEW/[g] [FILE...]");
+    cmd_reg("uniq", cmd_uniq, "uniq [-c] [FILE...]");
+    cmd_reg("sort", cmd_sort, "sort [-r] [FILE...]");
+    cmd_reg("printf", cmd_printf, "printf FORMAT [ARGS...]");
+    cmd_reg("pwd", cmd_pwd, "pwd");
+    cmd_reg("touch", cmd_touch, "touch FILE...");
+    cmd_reg("mkdir", cmd_mkdir, "mkdir [-p] DIR...");
+    cmd_reg("rmdir", cmd_rmdir, "rmdir DIR...");
+    cmd_reg("rm", cmd_rm, "rm [-rf] FILE...");
+    cmd_reg("cp", cmd_cp, "cp [-r] SRC DST");
+    cmd_reg("mv", cmd_mv, "mv SRC DST");
+    cmd_reg("ln", cmd_ln, "ln [-s] TARGET LINK");
+    cmd_reg("chmod", cmd_chmod, "chmod MODE FILE...");
+    cmd_reg("cd", cmd_cd, "cd [DIR]");
+    cmd_reg("env", cmd_env, "env [NAME=VALUE...]");
+    cmd_reg("install", cmd_install, "install DIR");
+    cmd_reg("ls", cmd_ls, "ls [DIR...]");
+    cmd_reg("find", cmd_find, "find [DIR...] [-name PAT] [-type f|d]");
+    cmd_reg("xargs", cmd_xargs, "xargs [CMD [ARGS...]]");
+    cmd_reg("test", cmd_test, "test EXPRESSION");
+    cmd_reg("[", cmd_test, "[ EXPRESSION ]");
+    cmd_reg("which", cmd_which, "which NAME");
+    cmd_reg("date", cmd_date, "date");
+    cmd_reg("sleep", cmd_sleep, "sleep SECONDS");
+    cmd_reg("kill", cmd_kill, "kill [-SIG] PID");
+    cmd_reg("sh", cmd_sh, "sh [-c COMMAND] [SCRIPT]");
 }
 
 static int dispatch(char * name, int argc, char ** argv) {
     cmd_fn fn = 0;
+    char * help = 0;
     int i = 0;
     while (i < ncmds && !fn) {
         if (strcmp(name, cmds[i].name) == 0) {
             fn = cmds[i].fn;
+            help = cmds[i].help;
         } else {
             i++;
         }
@@ -2725,12 +2832,18 @@ static int dispatch(char * name, int argc, char ** argv) {
         cx_err("toys: unknown command: ");
         cx_err(name);
         cx_err("\n");
+        return 1;
     }
-    int rc = 1;
-    if (fn) {
-        rc = fn(argc, argv);
+    if (argc > 1 && strcmp(argv[1], "--help") == 0) {
+        cx_err("usage: ");
+        cx_err(help);
+        cx_err("\n");
+        return 0;
     }
-    return rc;
+    if (argc > 1 && strcmp(argv[1], "--") == 0) {
+        return fn(argc - 1, argv + 1);
+    }
+    return fn(argc, argv);
 }
 
 int main(int argc, char ** argv) {
