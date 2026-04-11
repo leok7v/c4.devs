@@ -1,4 +1,5 @@
 #ifndef __cx__
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -6,6 +7,7 @@
 #include <fcntl.h>
 #include <ctype.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <dirent.h>
 #include <signal.h>
 #include <time.h>
@@ -65,15 +67,18 @@ static void sb_free(struct sb * b) {
 }
 
 static void cx_err(char * s) {
-    write(2, s, strlen(s));
+    (void)!write(
+2, s, strlen(s));
 }
 
 static void cx_out(char * s, int n) {
-    write(1, s, n);
+    (void)!write(
+1, s, n);
 }
 
 static void cx_puts(char * s) {
-    write(1, s, strlen(s));
+    (void)!write(
+1, s, strlen(s));
 }
 
 static int cx_itoa(int n, char * buf) {
@@ -127,7 +132,8 @@ static int cx_itopad(int n, char * buf, int w) {
 static void cx_putint(int fd, int n) {
     char buf[24];
     int len = cx_itoa(n, buf);
-    write(fd, buf, len);
+    (void)!write(
+fd, buf, len);
 }
 
 static int cx_getline(int fd, char * buf, int cap) {
@@ -301,7 +307,8 @@ static int cmd_basename(int argc, char ** argv) {
                 blen -= slen;
             }
         }
-        write(1, base, blen);
+        (void)!write(
+1, base, blen);
         cx_out("\n", 1);
     }
     return rc;
@@ -332,7 +339,8 @@ static int cmd_dirname(int argc, char ** argv) {
         } else if (last == 0) {
             cx_out("/", 1);
         } else {
-            write(1, path, last);
+            (void)!write(
+1, path, last);
         }
         cx_out("\n", 1);
     }
@@ -381,7 +389,8 @@ static void cat_fd(int fd) {
     char buf[4096];
     int n = read(fd, buf, 4096);
     while (n > 0) {
-        write(1, buf, n);
+        (void)!write(
+1, buf, n);
         n = read(fd, buf, 4096);
     }
 }
@@ -416,7 +425,8 @@ static void head_fd(int fd, int n) {
             done = 1;
         }
         if (!done) {
-            write(1, buf, len);
+            (void)!write(
+1, buf, len);
             line++;
         }
     }
@@ -478,7 +488,8 @@ static int cmd_tail(int argc, char ** argv) {
         }
         int j = start;
         while (j < l.count) {
-            write(1, l.data[j], l.lens[j]);
+            (void)!write(
+1, l.data[j], l.lens[j]);
             j++;
         }
     }
@@ -576,10 +587,12 @@ static int cmd_tee(int argc, char ** argv) {
         char buf[4096];
         int n = read(0, buf, 4096);
         while (n > 0) {
-            write(1, buf, n);
+            (void)!write(
+1, buf, n);
             int j = 0;
             while (j < nfds) {
-                write(fds[j], buf, n);
+                (void)!write(
+fds[j], buf, n);
                 j++;
             }
             n = read(0, buf, 4096);
@@ -610,7 +623,8 @@ static int cmd_rev(int argc, char ** argv) {
             lo++;
             hi--;
         }
-        write(1, buf, n);
+        (void)!write(
+1, buf, n);
         n = cx_getline(0, buf, 4096);
     }
     return rc;
@@ -638,7 +652,8 @@ static int cmd_tac(int argc, char ** argv) {
     if (!rc) {
         int i = l.count - 1;
         while (i >= 0) {
-            write(1, l.data[i], l.lens[i]);
+            (void)!write(
+1, l.data[i], l.lens[i]);
             i--;
         }
     }
@@ -662,9 +677,11 @@ static int cmd_nl(int argc, char ** argv) {
         int n = cx_getline(fd, buf, 4096);
         while (n > 0) {
             int nlen = cx_itopad(line, num, 6);
-            write(1, num, nlen);
+            (void)!write(
+1, num, nlen);
             cx_out("\t", 1);
-            write(1, buf, n);
+            (void)!write(
+1, buf, n);
             line++;
             n = cx_getline(fd, buf, 4096);
         }
@@ -695,7 +712,8 @@ static int cmd_fold(int argc, char ** argv) {
                     cx_out("\n", 1);
                     col = 0;
                 }
-                write(1, buf + i, 1);
+                (void)!write(
+1, buf + i, 1);
                 col++;
             }
             i++;
@@ -729,7 +747,8 @@ static int cmd_expand(int argc, char ** argv) {
                 cx_out("\n", 1);
                 col = 0;
             } else {
-                write(1, buf + i, 1);
+                (void)!write(
+1, buf + i, 1);
                 col++;
             }
             i++;
@@ -770,14 +789,16 @@ static int cmd_paste(int argc, char ** argv) {
                 char buf[4096];
                 int n = cx_getline(fds[j], buf, 4096);
                 if (j > 0) {
-                    write(1, &delim, 1);
+                    (void)!write(
+1, &delim, 1);
                 }
                 if (n > 0) {
                     any = 1;
                     if (buf[n - 1] == '\n') {
                         n--;
                     }
-                    write(1, buf, n);
+                    (void)!write(
+1, buf, n);
                 }
                 j++;
             }
@@ -827,7 +848,8 @@ static int cmd_tr(int argc, char ** argv) {
                 buf[p] = tab[buf[p] & 0xFF];
                 p++;
             }
-            write(1, buf, n);
+            (void)!write(
+1, buf, n);
             n = read(0, buf, 4096);
         }
     }
@@ -899,7 +921,8 @@ static int cmd_cut(int argc, char ** argv) {
                 start = 0;
                 end = 0;
             }
-            write(1, buf + start, end - start);
+            (void)!write(
+1, buf + start, end - start);
             cx_out("\n", 1);
             n = cx_getline(0, buf, 4096);
         }
@@ -977,7 +1000,8 @@ static int cmd_grep(int argc, char ** argv) {
                         cx_putint(1, line_no);
                         cx_out(":", 1);
                     }
-                    write(1, buf, n);
+                    (void)!write(
+1, buf, n);
                 }
             }
             n = cx_getline(0, buf, 4096);
@@ -1070,7 +1094,8 @@ static int cmd_sed(int argc, char ** argv) {
                     p++;
                 }
             }
-            write(1, out, oi);
+            (void)!write(
+1, out, oi);
             if (has_nl) {
                 cx_out("\n", 1);
             }
@@ -1085,10 +1110,12 @@ static void uniq_emit(char * line, int len, int count, int sc) {
         if (sc) {
             char num[16];
             int nlen = cx_itopad(count, num, 4);
-            write(1, num, nlen);
+            (void)!write(
+1, num, nlen);
             cx_out(" ", 1);
         }
-        write(1, line, len);
+        (void)!write(
+1, line, len);
         cx_out("\n", 1);
     }
 }
@@ -1181,7 +1208,8 @@ static int cmd_sort(int argc, char ** argv) {
         }
         int z = 0;
         while (z < l.count) {
-            write(1, l.data[z], l.lens[z]);
+            (void)!write(
+1, l.data[z], l.lens[z]);
             z++;
         }
     }
@@ -1209,7 +1237,8 @@ static int cmd_printf(int argc, char ** argv) {
                 } else if (fmt[p] == '\\') {
                     cx_out("\\", 1);
                 } else {
-                    write(1, fmt + p, 1);
+                    (void)!write(
+1, fmt + p, 1);
                 }
                 p++;
             } else if (fmt[p] == '%') {
@@ -1228,7 +1257,8 @@ static int cmd_printf(int argc, char ** argv) {
                     p++;
                 } else if (fmt[p] == 'c') {
                     if (ai < argc) {
-                        write(1, argv[ai], 1);
+                        (void)!write(
+1, argv[ai], 1);
                         ai++;
                     }
                     p++;
@@ -1237,7 +1267,8 @@ static int cmd_printf(int argc, char ** argv) {
                     p++;
                 }
             } else {
-                write(1, fmt + p, 1);
+                (void)!write(
+1, fmt + p, 1);
                 p++;
             }
         }
@@ -1254,14 +1285,15 @@ struct cx_stat {
 };
 
 static void cx_writes(int fd, char * s) {
-    write(fd, s, strlen(s));
+    (void)!write(
+fd, s, strlen(s));
 }
 
 static int dir_exists(char * path) {
     int yes = 0;
     struct cx_stat st;
     if (stat(path, (void*)&st) == 0) {
-        if ((st.mode & S_IFMT) == S_IFDIR) {
+        if (S_ISDIR(st.mode)) {
             yes = 1;
         }
     }
@@ -1311,7 +1343,8 @@ static int copy_file(char * src, char * dst) {
             char buf[4096];
             int n = read(sfd, buf, 4096);
             while (n > 0) {
-                write(dfd, buf, n);
+                (void)!write(
+dfd, buf, n);
                 n = read(sfd, buf, 4096);
             }
             close(dfd);
@@ -1327,7 +1360,7 @@ static int rm_recursive(char * path) {
     if (stat(path, (void*)&st) != 0) {
         rc = -1;
     }
-    if (!rc && (st.mode & S_IFMT) == S_IFDIR) {
+    if (!rc && S_ISDIR(st.mode)) {
         char * names = (char*)malloc(64 * 256);
         int ncount = 0;
         void * dp = opendir(path);
@@ -1758,10 +1791,11 @@ static int cmd_ls(int argc, char ** argv) {
                 struct cx_stat st;
                 if (stat(path, (void*)&st) == 0) {
                     char ch = '-';
-                    if ((st.mode & S_IFMT) == S_IFDIR) {
+                    if (S_ISDIR(st.mode)) {
                         ch = 'd';
                     }
-                    write(1, &ch, 1);
+                    (void)!write(
+1, &ch, 1);
                     cx_out(" ", 1);
                     cx_putint(1, st.size);
                     cx_out(" ", 1);
@@ -1798,8 +1832,8 @@ static int find_walk(char * path, char * name_pat, char tf) {
             }
         }
         if (show && tf) {
-            int is_dir = (st.mode & S_IFMT) == S_IFDIR;
-            int is_reg = (st.mode & S_IFMT) == S_IFREG;
+            int is_dir = S_ISDIR(st.mode);
+            int is_reg = S_ISREG(st.mode);
             if (tf == 'f' && !is_reg) {
                 show = 0;
             }
@@ -1924,14 +1958,12 @@ static int test_eval2(char * arg, char op) {
         }
     } else if (op == 'f') {
         struct cx_stat st;
-        if (stat(arg, (void*)&st) == 0 &&
-            (st.mode & S_IFMT) == S_IFREG) {
+        if (stat(arg, (void*)&st) == 0 && S_ISREG(st.mode)) {
             result = 0;
         }
     } else if (op == 'd') {
         struct cx_stat st;
-        if (stat(arg, (void*)&st) == 0 &&
-            (st.mode & S_IFMT) == S_IFDIR) {
+        if (stat(arg, (void*)&st) == 0 && S_ISDIR(st.mode)) {
             result = 0;
         }
     } else if (op == 'r') {

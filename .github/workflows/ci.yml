@@ -24,7 +24,10 @@ jobs:
       run: gcc -o build/cx-gcc cx.c -O3 -m64 -std=c11 -Wall -Werror
 
     - name: Build toys with gcc -Wall -Werror
-      run: gcc -o build/toys toys.c -O3 -m64 -std=c11 -Wall -Werror
+      run: gcc -o build/toys-gcc toys.c -O3 -m64 -std=c11 -Wall -Werror
+
+    - name: Build toys with clang -Wall -Werror
+      run: clang -o build/toys toys.c -O3 -m64 -std=c11 -Wall -Werror
 
     - name: Build cx with clang -Wall -Werror
       run: clang -o build/cx cx.c -O3 -m64 -std=c11 -Wall -Werror
