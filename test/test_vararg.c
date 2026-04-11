@@ -11,9 +11,10 @@ typedef int64_t * va_list;
 void my_printf(char * fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
-    printf("Arg 1: %d\n", *ap);
-    ap = ap - 1;
-    printf("Arg 2: %d\n", *ap);
+    printf("Arg 1: %d\n", (int)*ap);
+    ap = ap + 1;
+    printf("Arg 2: %d\n", (int)*ap);
+    va_end(ap);
 }
 
 int main() {

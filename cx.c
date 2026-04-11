@@ -103,7 +103,7 @@ enum {
     Num = 128, Fun, Sys, Glo, Loc, Id, Tdef,
     Bool, Char, Const, Else, Enum, If, Inline, Int, Int32_t, Int64_t, Return,
     Sizeof, Static, Struct, Typedef, Union, Void, While, For, Do, Switch, Case,
-    Default, Break, Continue,
+    Default, Break, Continue, Ellipsis,
     Comma, Assign, Cond, Lor,
     Lan, Or, Xor, And, Eq, Ne, Lt, Gt, Le, Ge, Shl, Shr, Add, Sub, Mul, Div,
     Mod, Inc, Dec, Brak, Arrow,
@@ -133,6 +133,7 @@ enum {
     I_DUP2, I_PIPE,
     I_TIME, I_LTIME, I_SLEEP, I_KILL,
     I_REALLOC,
+    I_VSTRT, I_VEND, I_VCPY, I_VSNPF,
     I_LAST
 };
 
@@ -176,6 +177,7 @@ void next() {
                              "ATOI,STAT,OPDR,RDDR,CLDR,UNLK,MKDR,RMDR,"
                              "GCWD,CHDR,GENV,ACCS,CHMD,LINK,SLNK,DUP2,"
                              "PIPE,TIME,LTME,SLEP,KILL,REAL,"
+                             "VSTR,VEND,VCPY,VSNP,"
                              [(opc - I_OPEN) * 5]);
                     }
                     if (opc <= ADJ || opc == REVN) {
@@ -415,9 +417,15 @@ void next() {
         } else if (tk == ',') {
             tk = Comma;
             return;
+        } else if (tk == '.') {
+            if (*p == '.' && p[1] == '.') {
+                p = p + 2;
+                tk = Ellipsis;
+            }
+            return;
         } else if (tk == '~' || tk == ';' || tk == '{' || tk == '}' ||
                    tk == '(' || tk == ')' || tk == ']' ||
-                   tk == ':' || tk == '.') {
+                   tk == ':') {
             return;
         }
     }
@@ -503,6 +511,10 @@ void intrinsics() {
     intrinsic("sleep", I_SLEEP);
     intrinsic("kill", I_KILL);
     intrinsic("realloc", I_REALLOC);
+    intrinsic("va_start", I_VSTRT);
+    intrinsic("va_end", I_VEND);
+    intrinsic("va_copy", I_VCPY);
+    intrinsic("vsnprintf", I_VSNPF);
 }
 
 void expect(int64_t t, char *s) { // expect token t and advance, else fatal
@@ -2841,6 +2853,7 @@ int64_t *compile(char *filename) {
                 next();
                 i = 0;
                 while (tk != ')') {
+                    if (tk == Ellipsis) { next(); break; }
                     skip_const();
                     ty = INT64;
                     if (tk == Int || tk == Bool) {
@@ -3311,6 +3324,81 @@ int64_t *compile(char *filename) {
     return (int64_t *)((char *)idmain[Val] - (char *)code_base);
 }
 
+// Minimal vsnprintf that walks a cx va_list (int64_t* into the VM stack).
+// Per-spec formatting is delegated to the host snprintf: we copy each
+// %... conversion from the user format into a small fmtbuf, patch the
+// length modifier to "ll" for integer conversions (cx slots are 8 bytes),
+// and call snprintf with the next slot value.
+int64_t cx_vsnprintf(char *buf, int64_t size, const char *fmt, int64_t *ap) {
+    int64_t total = 0;
+    const char *f = fmt;
+    char fmtbuf[32];
+    char tmp[256];
+    while (*f) {
+        if (*f != '%') {
+            if (buf && total + 1 < size) { buf[total] = *f; }
+            total++;
+            f++;
+            continue;
+        }
+        int fi = 0;
+        fmtbuf[fi++] = *f++; // '%'
+        while (*f && fi < 28) {
+            char ch = *f++;
+            fmtbuf[fi++] = ch;
+            if (ch == 'd' || ch == 'i' || ch == 'u' || ch == 'x' ||
+                ch == 'X' || ch == 'o' || ch == 's' || ch == 'c' ||
+                ch == 'p' || ch == '%') { break; }
+        }
+        fmtbuf[fi] = 0;
+        char spec = fmtbuf[fi - 1];
+        int tlen = 0;
+        if (spec == '%') {
+            tmp[0] = '%'; tlen = 1;
+        } else if (spec == 's') {
+            const char *s = (const char *)*ap++;
+            if (!s) { s = "(null)"; }
+            tlen = snprintf(tmp, sizeof(tmp), fmtbuf, s);
+        } else if (spec == 'c') {
+            int64_t v = *ap++;
+            tlen = snprintf(tmp, sizeof(tmp), fmtbuf, (int)v);
+        } else if (spec == 'p') {
+            int64_t v = *ap++;
+            tlen = snprintf(tmp, sizeof(tmp), fmtbuf, (void *)v);
+        } else {
+            // Integer conversion: rebuild format with 'll' length modifier.
+            char realfmt[36];
+            int ri = 0;
+            int j = 0;
+            while (j < fi - 1) {
+                char c = fmtbuf[j++];
+                if (c == 'l' || c == 'h' || c == 'z' || c == 't') { continue; }
+                realfmt[ri++] = c;
+            }
+            realfmt[ri++] = 'l';
+            realfmt[ri++] = 'l';
+            realfmt[ri++] = spec;
+            realfmt[ri] = 0;
+            int64_t v = *ap++;
+            tlen = snprintf(tmp, sizeof(tmp), realfmt, (long long)v);
+        }
+        if (tlen < 0) { tlen = 0; }
+        if (tlen >= (int)sizeof(tmp)) { tlen = (int)sizeof(tmp) - 1; }
+        int k = 0;
+        while (k < tlen) {
+            if (buf && total + 1 < size) { buf[total] = tmp[k]; }
+            total++;
+            k++;
+        }
+    }
+    if (buf && size > 0) {
+        int64_t end = total;
+        if (end >= size) { end = size - 1; }
+        buf[end] = '\0';
+    }
+    return total;
+}
+
 int run(int64_t *pc_offset, int argc, char **argv) {
     int64_t *sp, *bp, *t, *pc, a, cycle;
     pc = (int64_t *)((char *)code_base + (int64_t)pc_offset);
@@ -3538,6 +3626,14 @@ int run(int64_t *pc_offset, int argc, char **argv) {
             case I_SLEEP: a = sleep((int)*sp); break;
             case I_KILL: a = kill((int)sp[1], (int)*sp); break;
             case I_REALLOC: a = (int64_t)realloc((void *)sp[1], *sp); break;
+            case I_VSTRT: a = *sp + 8; break;
+            case I_VEND:  break;
+            case I_VCPY:  a = *sp; break;
+            case I_VSNPF:
+                t = sp + pc[1];
+                a = cx_vsnprintf((char *)t[-1], (int64_t)t[-2],
+                                 (const char *)t[-3], (int64_t *)t[-4]);
+                break;
 #ifndef __cx__
             case I_LTIME: {
                 time_t t = (time_t)sp[1];
