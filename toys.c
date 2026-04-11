@@ -21,7 +21,30 @@ typedef int64_t * va_list;
 #define va_start(ap, last) ap = va_start(&last)
 #define va_copy(dest, src) dest = va_copy(src)
 #define va_end(ap) va_end(ap)
+#define S_ISDIR(m) (((m) & S_IFMT) == S_IFDIR)
+#define S_ISREG(m) (((m) & S_IFMT) == S_IFREG)
 #endif
+
+static void cx_write(int fd, const void * buf, int n) {
+#ifndef __cx__
+    int r = (int)write(fd, buf, n);
+    (void)r;
+#else
+    write(fd, buf, n);
+#endif
+}
+
+static void cx_err(char * s) {
+    cx_write(2, s, (int)strlen(s));
+}
+
+static void cx_out(char * s, int n) {
+    cx_write(1, s, n);
+}
+
+static void cx_puts(char * s) {
+    cx_write(1, s, (int)strlen(s));
+}
 
 struct sb {
     int count;
@@ -30,7 +53,7 @@ struct sb {
 };
 
 static void * sb_oom(void * p) {
-    if (!p) { (void)!write(2, "Out of Memory\n", 14); exit(1); }
+    if (!p) { cx_write(2, "Out of Memory\n", 14); exit(1); }
     return p;
 }
 
@@ -65,21 +88,6 @@ static void sb_free(struct sb * b) {
     b->data = 0;
     b->count = 0;
     b->capacity = 0;
-}
-
-static void cx_err(char * s) {
-    (void)!write(
-2, s, strlen(s));
-}
-
-static void cx_out(char * s, int n) {
-    (void)!write(
-1, s, n);
-}
-
-static void cx_puts(char * s) {
-    (void)!write(
-1, s, strlen(s));
 }
 
 static int cx_itoa(int n, char * buf) {
@@ -133,8 +141,7 @@ static int cx_itopad(int n, char * buf, int w) {
 static void cx_putint(int fd, int n) {
     char buf[24];
     int len = cx_itoa(n, buf);
-    (void)!write(
-fd, buf, len);
+    cx_write(fd, buf, len);
 }
 
 static int cx_getline(int fd, char * buf, int cap) {
@@ -308,8 +315,7 @@ static int cmd_basename(int argc, char ** argv) {
                 blen -= slen;
             }
         }
-        (void)!write(
-1, base, blen);
+        cx_write(1, base, blen);
         cx_out("\n", 1);
     }
     return rc;
@@ -340,8 +346,7 @@ static int cmd_dirname(int argc, char ** argv) {
         } else if (last == 0) {
             cx_out("/", 1);
         } else {
-            (void)!write(
-1, path, last);
+            cx_write(1, path, last);
         }
         cx_out("\n", 1);
     }
@@ -390,8 +395,7 @@ static void cat_fd(int fd) {
     char buf[4096];
     int n = read(fd, buf, 4096);
     while (n > 0) {
-        (void)!write(
-1, buf, n);
+        cx_write(1, buf, n);
         n = read(fd, buf, 4096);
     }
 }
@@ -426,8 +430,7 @@ static void head_fd(int fd, int n) {
             done = 1;
         }
         if (!done) {
-            (void)!write(
-1, buf, len);
+            cx_write(1, buf, len);
             line++;
         }
     }
@@ -489,8 +492,7 @@ static int cmd_tail(int argc, char ** argv) {
         }
         int j = start;
         while (j < l.count) {
-            (void)!write(
-1, l.data[j], l.lens[j]);
+            cx_write(1, l.data[j], l.lens[j]);
             j++;
         }
     }
@@ -588,12 +590,10 @@ static int cmd_tee(int argc, char ** argv) {
         char buf[4096];
         int n = read(0, buf, 4096);
         while (n > 0) {
-            (void)!write(
-1, buf, n);
+            cx_write(1, buf, n);
             int j = 0;
             while (j < nfds) {
-                (void)!write(
-fds[j], buf, n);
+                cx_write(fds[j], buf, n);
                 j++;
             }
             n = read(0, buf, 4096);
@@ -624,8 +624,7 @@ static int cmd_rev(int argc, char ** argv) {
             lo++;
             hi--;
         }
-        (void)!write(
-1, buf, n);
+        cx_write(1, buf, n);
         n = cx_getline(0, buf, 4096);
     }
     return rc;
@@ -653,8 +652,7 @@ static int cmd_tac(int argc, char ** argv) {
     if (!rc) {
         int i = l.count - 1;
         while (i >= 0) {
-            (void)!write(
-1, l.data[i], l.lens[i]);
+            cx_write(1, l.data[i], l.lens[i]);
             i--;
         }
     }
@@ -678,11 +676,9 @@ static int cmd_nl(int argc, char ** argv) {
         int n = cx_getline(fd, buf, 4096);
         while (n > 0) {
             int nlen = cx_itopad(line, num, 6);
-            (void)!write(
-1, num, nlen);
+            cx_write(1, num, nlen);
             cx_out("\t", 1);
-            (void)!write(
-1, buf, n);
+            cx_write(1, buf, n);
             line++;
             n = cx_getline(fd, buf, 4096);
         }
@@ -713,8 +709,7 @@ static int cmd_fold(int argc, char ** argv) {
                     cx_out("\n", 1);
                     col = 0;
                 }
-                (void)!write(
-1, buf + i, 1);
+                cx_write(1, buf + i, 1);
                 col++;
             }
             i++;
@@ -748,8 +743,7 @@ static int cmd_expand(int argc, char ** argv) {
                 cx_out("\n", 1);
                 col = 0;
             } else {
-                (void)!write(
-1, buf + i, 1);
+                cx_write(1, buf + i, 1);
                 col++;
             }
             i++;
@@ -790,16 +784,14 @@ static int cmd_paste(int argc, char ** argv) {
                 char buf[4096];
                 int n = cx_getline(fds[j], buf, 4096);
                 if (j > 0) {
-                    (void)!write(
-1, &delim, 1);
+                    cx_write(1, &delim, 1);
                 }
                 if (n > 0) {
                     any = 1;
                     if (buf[n - 1] == '\n') {
                         n--;
                     }
-                    (void)!write(
-1, buf, n);
+                    cx_write(1, buf, n);
                 }
                 j++;
             }
@@ -849,8 +841,7 @@ static int cmd_tr(int argc, char ** argv) {
                 buf[p] = tab[buf[p] & 0xFF];
                 p++;
             }
-            (void)!write(
-1, buf, n);
+            cx_write(1, buf, n);
             n = read(0, buf, 4096);
         }
     }
@@ -922,8 +913,7 @@ static int cmd_cut(int argc, char ** argv) {
                 start = 0;
                 end = 0;
             }
-            (void)!write(
-1, buf + start, end - start);
+            cx_write(1, buf + start, end - start);
             cx_out("\n", 1);
             n = cx_getline(0, buf, 4096);
         }
@@ -1001,8 +991,7 @@ static int cmd_grep(int argc, char ** argv) {
                         cx_putint(1, line_no);
                         cx_out(":", 1);
                     }
-                    (void)!write(
-1, buf, n);
+                    cx_write(1, buf, n);
                 }
             }
             n = cx_getline(0, buf, 4096);
@@ -1095,8 +1084,7 @@ static int cmd_sed(int argc, char ** argv) {
                     p++;
                 }
             }
-            (void)!write(
-1, out, oi);
+            cx_write(1, out, oi);
             if (has_nl) {
                 cx_out("\n", 1);
             }
@@ -1111,12 +1099,10 @@ static void uniq_emit(char * line, int len, int count, int sc) {
         if (sc) {
             char num[16];
             int nlen = cx_itopad(count, num, 4);
-            (void)!write(
-1, num, nlen);
+            cx_write(1, num, nlen);
             cx_out(" ", 1);
         }
-        (void)!write(
-1, line, len);
+        cx_write(1, line, len);
         cx_out("\n", 1);
     }
 }
@@ -1209,8 +1195,7 @@ static int cmd_sort(int argc, char ** argv) {
         }
         int z = 0;
         while (z < l.count) {
-            (void)!write(
-1, l.data[z], l.lens[z]);
+            cx_write(1, l.data[z], l.lens[z]);
             z++;
         }
     }
@@ -1238,8 +1223,7 @@ static int cmd_printf(int argc, char ** argv) {
                 } else if (fmt[p] == '\\') {
                     cx_out("\\", 1);
                 } else {
-                    (void)!write(
-1, fmt + p, 1);
+                    cx_write(1, fmt + p, 1);
                 }
                 p++;
             } else if (fmt[p] == '%') {
@@ -1258,8 +1242,7 @@ static int cmd_printf(int argc, char ** argv) {
                     p++;
                 } else if (fmt[p] == 'c') {
                     if (ai < argc) {
-                        (void)!write(
-1, argv[ai], 1);
+                        cx_write(1, argv[ai], 1);
                         ai++;
                     }
                     p++;
@@ -1268,8 +1251,7 @@ static int cmd_printf(int argc, char ** argv) {
                     p++;
                 }
             } else {
-                (void)!write(
-1, fmt + p, 1);
+                cx_write(1, fmt + p, 1);
                 p++;
             }
         }
@@ -1286,8 +1268,7 @@ struct cx_stat {
 };
 
 static void cx_writes(int fd, char * s) {
-    (void)!write(
-fd, s, strlen(s));
+    cx_write(fd, s, strlen(s));
 }
 
 static int dir_exists(char * path) {
@@ -1344,8 +1325,7 @@ static int copy_file(char * src, char * dst) {
             char buf[4096];
             int n = read(sfd, buf, 4096);
             while (n > 0) {
-                (void)!write(
-dfd, buf, n);
+                cx_write(dfd, buf, n);
                 n = read(sfd, buf, 4096);
             }
             close(dfd);
@@ -1795,8 +1775,7 @@ static int cmd_ls(int argc, char ** argv) {
                     if (S_ISDIR(st.mode)) {
                         ch = 'd';
                     }
-                    (void)!write(
-1, &ch, 1);
+                    cx_write(1, &ch, 1);
                     cx_out(" ", 1);
                     cx_putint(1, st.size);
                     cx_out(" ", 1);
