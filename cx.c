@@ -58,7 +58,7 @@ int64_t *e, *le,  // current position in emitted code
     scope_sp; // scope stack pointer
 
 static int64_t sym_pool[32768]   = {0};
-static int64_t code_pool[32768]  = {0};
+static int64_t code_pool[65536]  = {0};
 static int64_t stack_pool[32768] = {0};
 char* src_pool;
 int64_t struct_syms_arr[256] = {0};
@@ -679,6 +679,72 @@ void size_of(void) {
     expect('(', "open paren expected in sizeof");
     ty = INT64;
     skip_const();
+    if (tk == Id && (id[Class] == Loc || id[Class] == Glo)) {
+        int64_t var_ty = id[Type];
+        int64_t extent = id[Extent];
+        next();
+        expect(')', "close paren expected in sizeof");
+        int64_t elem_sz;
+        int64_t base_ty;
+        if (extent > 0) {
+            base_ty = var_ty - PTR;
+        } else {
+            base_ty = var_ty;
+        }
+        if (base_ty == CHAR) {
+            elem_sz = 1;
+        } else if (base_ty == INT32) { 
+            elem_sz = 4;
+        } else if (base_ty > INT64 && base_ty < FNPTR) {
+            elem_sz = ((int64_t *)struct_syms[base_ty - INT64 - 1])[Val];
+        } else { 
+            elem_sz = 8;
+        }
+        *++e = IMM;
+        if (extent > 0) {
+            *++e = extent * elem_sz;
+        } else {
+            *++e = elem_sz;
+        }
+        ty = INT64;
+    } else {
+        if (tk == Int || tk == Bool) {
+            next();
+        } else if (tk == Int32_t) {
+            next(); 
+            ty = INT32;
+        } else if (tk == Int64_t) {
+            next(); 
+            ty = INT64;
+        } else if (tk == Char) {
+            next(); 
+            ty = CHAR;
+        } else if (tk == Struct || tk == Union) {
+            next();
+            if (tk == Id && id[Class] == Struct) { 
+                ty = id[Type]; 
+                next(); 
+            }
+        } else if (tk == Id && id[Class] == Tdef) {
+            ty = id[Type];
+            next();
+        }
+        while (tk == Mul) {
+            next(); 
+            ty = ty + PTR; 
+        }
+        expect(')', "close paren expected in sizeof");
+        *++e = IMM;
+        emit_size(ty);
+        ty = INT64;
+    }
+}
+
+/*
+void size_of(void) {
+    expect('(', "open paren expected in sizeof");
+    ty = INT64;
+    skip_const();
     if (tk == Int || tk == Bool) {
         next();
     } else if (tk == Int32_t) {
@@ -700,6 +766,7 @@ void size_of(void) {
     emit_size(ty);
     ty = INT64;
 }
+*/
 
 void expression(int64_t lev);
 void statement(void);
@@ -783,13 +850,17 @@ void do_while_stmt(void) {
 }
 
 void switch_stmt(void) {
-    int64_t *b, *break_stack[256], **break_sp, case_val;
+    // Breaks inside nested compound statements in a case body go through
+    // statement()'s Break handler, which writes to brk_patches. Route the
+    // switch's own breaks through the same stack so both reach the end of
+    // the switch instead of escaping to an enclosing loop.
+    int64_t *b, case_val, saved_brk_sp, j;
     expect('(', "open paren expected");
     expression(Comma);
     expect(')', "close paren expected");
     *++e = PSH;
     expect('{', "open brace expected");
-    break_sp = break_stack;
+    saved_brk_sp = brk_sp;
     b = 0;
     while (tk != '}') {
         if (tk == Case) {
@@ -816,25 +887,18 @@ void switch_stmt(void) {
             next();
             expect(':', "colon expected");
             b = 0;
-        } else if (tk == Break) {
-            next();
-            if (tk == ';') {
-                next();
-            } else {
-                fatal("semicolon expected");
-            }
-            *++e = JMP;
-            *break_sp++ = ++e;
         } else {
             statement();
         }
     }
     next();
     if (b) { *b = (int64_t)((char *)(e + 1) - (char *)b); }
-    while (break_sp > break_stack) { 
-        int64_t *patch = *--break_sp;
-        *patch = (int64_t)((char *)(e + 1) - (char *)patch);
+    j = saved_brk_sp;
+    while (j < brk_sp) {
+        *(int64_t *)brk_patches[j] = (int64_t)((char *)(e + 1) - (char *)brk_patches[j]);
+        j = j + 1;
     }
+    brk_sp = saved_brk_sp;
     *++e = ADJ;
     *++e = 1;
 }
@@ -867,6 +931,26 @@ void return_stmt(void) {
     expect(';', "semicolon expected");
 }
 
+void preinc(int64_t t) { // pre-increment/decrement
+    int64_t base_ty;
+    if (*e == LC) { *e = PSH; *++e = LC;
+    } else if (*e == LI32) { *e = PSH; *++e = LI32;
+    } else if (*e == LI) { *e = PSH; *++e = LI;
+    } else { fatal("bad lvalue in pre-increment"); }
+    *++e = PSH;
+    *++e = IMM;
+    if (ty > PTR) {
+        base_ty = ty - PTR;
+        if (base_ty == CHAR) { *++e = sizeof(char);
+        } else if (base_ty == INT32) { *++e = 4;
+        } else if (base_ty > INT64 && base_ty < FNPTR) {
+            *++e = ((int64_t *)struct_syms[base_ty - INT64 - 1])[Val];
+        } else { *++e = sizeof(int64_t); }
+    } else { *++e = 1; }
+    *++e = (t == Inc) ? ADD : SUB;
+    store();
+}
+
 void postinc(int64_t t) { // post-increment/decrement
     int64_t base_ty;
     if (*e == LC) { *e = PSH; *++e = LC;
@@ -894,7 +978,7 @@ void postinc(int64_t t) { // post-increment/decrement
 }
 
 void expression(int64_t lev) {
-    int64_t t, *d, base_ty;
+    int64_t t, *d;
     if (!tk) { fatal("unexpected eof in expression"); }
     switch (tk) {
         case Num:
@@ -1080,28 +1164,13 @@ void expression(int64_t lev) {
             }
             ty = INT64;
             break;
+        // Inc/Dec are split (not stacked) because cx's C4-style switch
+        // re-checks the scrutinee at every case label, so a stacked
+        // `case Inc: case Dec:` would silently skip the body when self-hosted.
         case Inc:
+            next(); expression(Inc); preinc(Inc); break;
         case Dec:
-            t = tk;
-            next();
-            expression(Inc);
-            if (*e == LC) { *e = PSH; *++e = LC;
-            } else if (*e == LI32) { *e = PSH; *++e = LI32;
-            } else if (*e == LI) { *e = PSH; *++e = LI;
-            } else { fatal("bad lvalue in pre-increment"); }
-            *++e = PSH;
-            *++e = IMM;
-            if (ty > PTR) {
-                base_ty = ty - PTR;
-                if (base_ty == CHAR) { *++e = sizeof(char);
-                } else if (base_ty == INT32) { *++e = 4;
-                } else if (base_ty > INT64 && base_ty < FNPTR) {
-                    *++e = ((int64_t *)struct_syms[base_ty - INT64 - 1])[Val];
-                } else { *++e = sizeof(int64_t); }
-            } else { *++e = 1; }
-            *++e = (t == Inc) ? ADD : SUB;
-            store();
-            break;
+            next(); expression(Inc); preinc(Dec); break;
         default:
             fatal("bad expression");
     }
@@ -1937,21 +2006,16 @@ void statement(void) {
 char* mem_read(const char* filename) {
     char* return_ptr = 0;
     int file_descriptor = open(filename, O_RDONLY);
-    
     if (file_descriptor != -1) {
         int64_t file_size = lseek(file_descriptor, 0, 2); // SEEK_END
         lseek(file_descriptor, 0, 0); // SEEK_SET
-        
         int64_t total_size = file_size + 16;
-        
         char* mapped_memory = (char*)mmap(0, total_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
-        
         if (mapped_memory != MAP_FAILED) {
             int64_t* metadata = (int64_t*)mapped_memory;
             metadata[0] = (int64_t)file_descriptor;
             metadata[1] = total_size;
-            
-            ssize_t nread = read(file_descriptor, mapped_memory + 16, file_size);
+            int64_t nread = (int64_t)read(file_descriptor, mapped_memory + 16, file_size);
             (void)nread;
             return_ptr = (char*)(mapped_memory + 16);
         }
@@ -3111,7 +3175,7 @@ int64_t *compile(char *filename) {
                         } else {
                             ++i;
                         }
-                        if (id[Val] == 0) { id[Val] = i; }
+                        id[Val] = i;
                         if (tk == Assign) {
                             d = id;
                             next();
@@ -3295,74 +3359,149 @@ int64_t *compile(char *filename) {
 // %... conversion from the user format into a small fmtbuf, patch the
 // length modifier to "ll" for integer conversions (cx slots are 8 bytes),
 // and call snprintf with the next slot value.
-int64_t cx_vsnprintf(char *buf, int64_t size, const char *fmt, int64_t *ap) {
-    int64_t total = 0;
-    const char *f = fmt;
-    char fmtbuf[32];
-    char tmp[256];
-    while (*f) {
-        if (*f != '%') {
-            if (buf && total + 1 < size) { buf[total] = *f; }
-            total++;
-            f++;
-            continue;
-        }
-        int fi = 0;
-        fmtbuf[fi++] = *f++; // '%'
-        while (*f && fi < 28) {
-            char ch = *f++;
-            fmtbuf[fi++] = ch;
-            if (ch == 'd' || ch == 'i' || ch == 'u' || ch == 'x' ||
-                ch == 'X' || ch == 'o' || ch == 's' || ch == 'c' ||
-                ch == 'p' || ch == '%') { break; }
-        }
-        fmtbuf[fi] = 0;
-        char spec = fmtbuf[fi - 1];
-        int tlen = 0;
-        if (spec == '%') {
-            tmp[0] = '%'; tlen = 1;
-        } else if (spec == 's') {
-            const char *s = (const char *)*ap++;
-            if (!s) { s = "(null)"; }
-            tlen = snprintf(tmp, sizeof(tmp), fmtbuf, s);
-        } else if (spec == 'c') {
-            int64_t v = *ap++;
-            tlen = snprintf(tmp, sizeof(tmp), fmtbuf, (int)v);
-        } else if (spec == 'p') {
-            int64_t v = *ap++;
-            tlen = snprintf(tmp, sizeof(tmp), fmtbuf, (void *)v);
+
+static int64_t rt_pad(char *str, int64_t size, int64_t n, int64_t pad, char c) {
+    while (pad > 0) {
+        if (n < size && str) { str[n] = c; }
+        n++;
+        pad--;
+    }
+    return n;
+}
+
+static int64_t rt_outs(char *str, int64_t size, int64_t n, char *s, 
+                       int64_t len) {
+    int64_t i = 0;
+    while (i < len) {
+        if (n < size && str) { str[n] = s[i]; }
+        n++;
+        i++;
+    }
+    return n;
+}
+
+static char *rt_itoa(char *end, int64_t val, char spec, int64_t *neg, 
+                     int64_t *len) {
+    int64_t base = (spec == 'x' || spec == 'X') ? 16 : 10;
+    if (spec == 'd' && val < 0) {
+        *neg = 1;
+        val = -val;
+    } else {
+        *neg = 0;
+    }
+    char *ptr = end - 1;
+    *ptr = '\0';
+    char *digits = (spec == 'X') ? "0123456789ABCDEF" : "0123456789abcdef";
+    do {
+        int64_t rem = val % base;
+        if (rem < 0) { rem = -rem; }
+        *--ptr = digits[rem];
+        val = val / base;
+    } while (val);
+    *len = (end - 1) - ptr;
+    return ptr;
+}
+
+static int64_t rt_dtoa(char *buf, int64_t len, int64_t raw_double_val,
+                       int64_t prec, char format) { // TODO: float/double
+    if (len > 7) {
+        buf[0] = '#'; buf[1] = '#'; buf[2] = '#'; buf[3] = '.';
+        buf[4] = '#'; buf[5] = '#'; buf[6] = '#'; buf[7] = '\0';
+        return 7;
+    }
+    return 0;
+}
+
+static int64_t rt_vsnprintf(char *str, int64_t size, const char *fmt,
+                            int64_t *args) {
+    int64_t n = 0;
+    char tmp[128];
+    int64_t *ap = args;
+    for (; *fmt; ++fmt) {
+        if (*fmt != '%') {
+            if (n < size && str) { str[n] = *fmt; }
+            n++;
         } else {
-            // Integer conversion: rebuild format with 'll' length modifier.
-            char realfmt[36];
-            int ri = 0;
-            int j = 0;
-            while (j < fi - 1) {
-                char c = fmtbuf[j++];
-                if (c == 'l' || c == 'h' || c == 'z' || c == 't') { continue; }
-                realfmt[ri++] = c;
+            fmt++;
+            int64_t w = 0;
+            int64_t p = -1;
+            int64_t left_align = 0;
+            int64_t zero_pad = 0;
+            while (*fmt == '-' || *fmt == '0') {
+                if (*fmt == '-') { left_align = 1; }
+                if (*fmt == '0') { zero_pad = 1; }
+                fmt++;
             }
-            realfmt[ri++] = 'l';
-            realfmt[ri++] = 'l';
-            realfmt[ri++] = spec;
-            realfmt[ri] = 0;
-            int64_t v = *ap++;
-            tlen = snprintf(tmp, sizeof(tmp), realfmt, (long long)v);
-        }
-        if (tlen < 0) { tlen = 0; }
-        if (tlen >= (int)sizeof(tmp)) { tlen = (int)sizeof(tmp) - 1; }
-        int k = 0;
-        while (k < tlen) {
-            if (buf && total + 1 < size) { buf[total] = tmp[k]; }
-            total++;
-            k++;
+            if (*fmt == '*') {
+                w = *ap++;
+                fmt++;
+            } else {
+                while (*fmt >= '0' && *fmt <= '9') {
+                    w = w * 10 + (*fmt++ - '0');
+                }
+            }
+            if (*fmt == '.') {
+                fmt++;
+                if (*fmt == '*') {
+                    p = *ap++;
+                    fmt++;
+                } else {
+                    p = 0;
+                    while (*fmt >= '0' && *fmt <= '9') {
+                        p = p * 10 + (*fmt++ - '0');
+                    }
+                }
+            }
+            while (*fmt == 'l') { fmt++; }
+            char spec = *fmt;
+            if (spec == 's') {
+                char *s = (char *)(*ap++);
+                if (!s) { s = "(null)"; }
+                int64_t len = 0;
+                while (s[len] && (p < 0 || len < p)) { len++; }
+                int64_t pad = w - len;
+                if (left_align == 0) { n = rt_pad(str, size, n, pad, ' '); }
+                n = rt_outs(str, size, n, s, len);
+                if (left_align == 1) { n = rt_pad(str, size, n, pad, ' '); }
+            } else if (spec == 'd' || spec == 'x' || spec == 'X') {
+                int64_t val = *ap++;
+                int64_t neg = 0;
+                int64_t dlen = 0;
+                char *ptr = rt_itoa(tmp + 128, val, spec, &neg, &dlen);
+                int64_t zeroes = (p > dlen) ? p - dlen : 0;
+                if (zero_pad == 1 && p < 0 && left_align == 0) {
+                    int64_t zpad = w - dlen - neg;
+                    if (zpad > 0) { zeroes = zpad; }
+                }
+                int64_t tot = dlen + zeroes + neg;
+                int64_t pad = w - tot;
+                if (left_align == 0) { n = rt_pad(str, size, n, pad, ' '); }
+                if (neg) {
+                    if (n < size && str) { str[n] = '-'; }
+                    n++;
+                }
+                n = rt_pad(str, size, n, zeroes, '0');
+                n = rt_outs(str, size, n, ptr, dlen);
+                if (left_align == 1) { n = rt_pad(str, size, n, pad, ' '); }
+            } else if (spec == 'f' || spec == 'g') {
+                int64_t raw_val = *ap++;
+                int64_t prec = (p >= 0) ? p : 6;
+                int64_t flen = rt_dtoa(tmp, 128, raw_val, prec, spec);
+                int64_t pad = w - flen;
+                if (left_align == 0) { n = rt_pad(str, size, n, pad, ' '); }
+                n = rt_outs(str, size, n, tmp, flen);
+                if (left_align == 1) { n = rt_pad(str, size, n, pad, ' '); }
+            } else {
+                if (n < size && str) { str[n] = spec; }
+                n++;
+            }
         }
     }
-    if (buf && size > 0) {
-        int64_t end = total;
-        if (end >= size) { end = size - 1; }
-        buf[end] = '\0';
+    if (size > 0) {
+        if (n < size) { str[n] = '\0'; }
+        else { str[size - 1] = '\0'; }
     }
-    return total;
+    return n;
 }
 
 int run(int64_t *pc_offset, int argc, char **argv) {
@@ -3561,10 +3700,15 @@ int run(int64_t *pc_offset, int argc, char **argv) {
             }
             case I_CLDIR: a = closedir((DIR*)*sp); break;
 #else
-            case I_STAT: a = -1; break;
-            case I_OPDIR: a = 0; break;
-            case I_RDDIR: a = 0; break;
-            case I_CLDIR: a = -1; break;
+            // Self-hosted: cx can't parse struct stat / DIR* / struct dirent
+            // in the native branch above, so forward each call to the same
+            // intrinsic on the outer VM. cx resolves these names via the
+            // intrinsic() registrations, so the Sys call emits the matching
+            // opcode, which the native run() handles for real.
+            case I_STAT:  a = stat((char*)sp[1], (char*)sp[0]); break;
+            case I_OPDIR: a = opendir((char*)*sp); break;
+            case I_RDDIR: a = readdir((char*)*sp); break;
+            case I_CLDIR: a = closedir((char*)*sp); break;
 #endif
             case I_UNLNK: a = unlink((char*)*sp); break;
             case I_MKDIR: a = mkdir((char*)sp[1], (int)*sp); break;
@@ -3597,7 +3741,7 @@ int run(int64_t *pc_offset, int argc, char **argv) {
             case I_VCPY:  a = *sp; break;
             case I_VSNPF:
                 t = sp + pc[1];
-                a = cx_vsnprintf((char *)t[-1], (int64_t)t[-2],
+                a = rt_vsnprintf((char *)t[-1], (int64_t)t[-2],
                                  (const char *)t[-3], (int64_t *)t[-4]);
                 break;
 #ifndef __cx__
@@ -3619,7 +3763,7 @@ int run(int64_t *pc_offset, int argc, char **argv) {
                 break;
             }
 #else
-            case I_LTIME: a = -1; break;
+            case I_LTIME: a = localtime((char*)sp[1], (char*)*sp); break;
 #endif
             default:
                 printf("unknown instruction = %d! cycle = %d\n",

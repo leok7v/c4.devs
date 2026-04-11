@@ -2,9 +2,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-int run_test(char *filename) {
+int run(char * filename, const char * with) {
     char *cmd = malloc(256);
     strcpy(cmd, "./build/cx ");
+    strcat(cmd, with);
     strcat(cmd, filename);
     printf("\n=== Running Test: %s ===\n", filename);
     int status = system(cmd);
@@ -19,7 +20,7 @@ int main(int argc, char **argv) {
         int i = 1;
         while (i < argc) {
             total++;
-            if (run_test(argv[i])) { passed++; }
+            if (run(argv[i])) { passed++; }
             i++;
         }
     } else {
@@ -46,7 +47,10 @@ int main(int argc, char **argv) {
                 }
                 if (!is_self && len > 0) {
                     total++;
-                    if (run_test(filename)) { passed++; }
+                    if (run(filename, "") &&
+                        run(filename, "cx.c ")) {
+                        passed++;
+                    }
                 }
                 filename = ptr + 1;
             }
