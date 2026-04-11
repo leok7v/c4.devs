@@ -2556,35 +2556,39 @@ void add_symbol(char *name, int64_t val) {
 }
 
 void init_definitions() {
+    // Use the host's actual header values rather than hardcoded literals,
+    // so cx-compiled programs see the correct bit patterns for whatever
+    // platform built cx. macOS and Linux disagree on nearly every bit here
+    // (O_CREAT, O_TRUNC, O_APPEND, MAP_ANON, MS_SYNC, ...).
     // From sys/mman.h
-    add_symbol("PROT_READ", 1);
-    add_symbol("PROT_WRITE", 2);
-    add_symbol("MAP_SHARED", 1);
-    add_symbol("MAP_PRIVATE", 2);
-    add_symbol("MAP_FAILED", 0xFFFFFFFFFFFFFFFF); // (void*)-1
-    add_symbol("MAP_ANON", 0x1000);
-    add_symbol("MS_SYNC", 0x10000); // from macOS
+    add_symbol("PROT_READ", PROT_READ);
+    add_symbol("PROT_WRITE", PROT_WRITE);
+    add_symbol("MAP_SHARED", MAP_SHARED);
+    add_symbol("MAP_PRIVATE", MAP_PRIVATE);
+    add_symbol("MAP_FAILED", -1); // ((void*)-1)
+    add_symbol("MAP_ANON", MAP_ANON);
+    add_symbol("MS_SYNC", MS_SYNC);
     // From fcntl.h
-    add_symbol("O_RDONLY", 0);
-    add_symbol("O_WRONLY", 1);
-    add_symbol("O_RDWR", 2);
-    add_symbol("O_CREAT", 0x200);
-    add_symbol("O_TRUNC", 0x400);
-    add_symbol("O_APPEND", 0x008);
+    add_symbol("O_RDONLY", O_RDONLY);
+    add_symbol("O_WRONLY", O_WRONLY);
+    add_symbol("O_RDWR", O_RDWR);
+    add_symbol("O_CREAT", O_CREAT);
+    add_symbol("O_TRUNC", O_TRUNC);
+    add_symbol("O_APPEND", O_APPEND);
     // From unistd.h (for lseek)
-    add_symbol("SEEK_SET", 0);
-    add_symbol("SEEK_CUR", 1);
-    add_symbol("SEEK_END", 2);
-    // From sys/stat.h - POSIX standard octal values
-    add_symbol("S_IFMT",  0170000);
-    add_symbol("S_IFDIR", 0040000);
-    add_symbol("S_IFREG", 0100000);
-    add_symbol("S_IFLNK", 0120000);
+    add_symbol("SEEK_SET", SEEK_SET);
+    add_symbol("SEEK_CUR", SEEK_CUR);
+    add_symbol("SEEK_END", SEEK_END);
+    // From sys/stat.h
+    add_symbol("S_IFMT",  S_IFMT);
+    add_symbol("S_IFDIR", S_IFDIR);
+    add_symbol("S_IFREG", S_IFREG);
+    add_symbol("S_IFLNK", S_IFLNK);
     // From unistd.h - access() mode flags
-    add_symbol("R_OK", 4);
-    add_symbol("W_OK", 2);
-    add_symbol("X_OK", 1);
-    add_symbol("F_OK", 0);
+    add_symbol("R_OK", R_OK);
+    add_symbol("W_OK", W_OK);
+    add_symbol("X_OK", X_OK);
+    add_symbol("F_OK", F_OK);
 }
 
 int64_t *compile(char *filename) {
@@ -2984,7 +2988,6 @@ int64_t *compile(char *filename) {
                             int64_t sz;
                             sz = ((int64_t *)struct_syms[sty - INT64 - 1])[Val];
                             int64_t slots = (sz + 7) / 8;
-                            int64_t param_slot = pid[Val];
                             i = i + slots;
                             int64_t local_slot = i;
                             *++e = LEA;
