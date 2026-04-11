@@ -73,18 +73,18 @@ int main() {
         fail++;
     #endif
 #endif
-    // Test 8: os() conditional (at least one should be true)
+    // Test 8: OS conditional (at least one should be true)
     int os_detected = 0;
-#if os(linux)
-    printf("OK: os(linux) detected\n");
+#ifdef __linux__
+    printf("OK: __linux__ detected\n");
     os_detected = 1;
 #endif
-#if os(apple)
-    printf("OK: os(apple) detected\n");
+#ifdef __APPLE__
+    printf("OK: __APPLE__ detected\n");
     os_detected = 1;
 #endif
-#if os(windows)
-    printf("OK: os(windows) detected\n");
+#ifdef _WIN32
+    printf("OK: _WIN32 detected\n");
     os_detected = 1;
 #endif
     if (os_detected) {

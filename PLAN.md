@@ -43,7 +43,7 @@ See STYLE.md for all coding conventions.
 
     structs, unions, typedefs, function pointers (incl callbacks)
     fixed-size arrays (local + global), array initializers
-    #if os(linux) / #if os(apple) / #if os(windows)
+    #ifdef __linux__ / #ifdef __APPLE__ / #ifdef _WIN32
     #include "file", #define NAME value, #ifdef/#ifndef
     for(int i=0;...) scoping, mid-block declarations
 
@@ -58,7 +58,8 @@ See STYLE.md for all coding conventions.
    Use char literal 9 for tab.
 
 3. O_CREAT and O_TRUNC symbol values are macOS-only.
-   On Linux the values differ. Use #if os() blocks
+   On Linux the values differ. Use OS-specific blocks
+
    to define portable constants.
 
 4. No variadic functions. printf is a special intrinsic.
@@ -485,7 +486,7 @@ commands, handles the printf/write quirk.
 
 **Deliverables:**
 - toy.c with platform constants for O_CREAT etc
-  using #if os(linux) / #if os(apple)
+  using #ifdef __linux__ / #ifdef __APPLE__
 - Utility library: cx_strchr cx_strrchr cx_strstr
   cx_atoi cx_itoa cx_itopad cx_putint cx_isdigit
   cx_isspace cx_isalpha cx_tolower cx_getline

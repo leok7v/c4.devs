@@ -135,7 +135,7 @@ identifier     = letter { letter | digit | "_" } ;
 - `#define NAME` — define without value (for ifdef checks)
 - `#undef NAME` — undefine a macro
 - `#ifdef NAME` / `#ifndef NAME` — conditional compilation
-- `#if os(linux)` / `#if os(apple)` / `#if os(windows)` — OS detection
+- `#ifdef __linux__` / `#ifdef __APPLE__` / `#ifdef _WIN32` — OS detection
 - `#elif` / `#else` / `#endif` — conditional block control
 - `#include "file"` — local file inclusion
 - `#include <file>` — system includes (skipped, intrinsics provide stdlib)
@@ -168,7 +168,7 @@ identifier     = letter { letter | digit | "_" } ;
 
 ### Preprocessor (unsupported features)
 - Function-like macros: `#define MAX(a,b) ...`
-- `#if` with arbitrary expressions (only `os()` and 0/1 supported)
+- `#if` with arbitrary expressions (only 0/1 supported)
 - `#error`, `#warning`
 - Token pasting (`##`), stringizing (`#`)
 - Recursive/nested macro expansion

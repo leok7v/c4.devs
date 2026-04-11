@@ -9,7 +9,60 @@
 #include <dirent.h>
 #include <signal.h>
 #include <time.h>
+#include <stdarg.h>
+#include <stdint.h>
 #endif
+
+#ifdef __cx__
+typedef int64_t * va_list;
+#define va_start(ap, last) ap = va_start(&last)
+#define va_copy(dest, src) dest = va_copy(src)
+#define va_end(ap) va_end(ap)
+#endif
+
+struct sb {
+    int count;
+    int capacity;
+    char * data;
+};
+
+static void * sb_oom(void * p) {
+    if (!p) { write(2, "Out of Memory\n", 14); exit(1); }
+    return p;
+}
+
+static void sb_grow(struct sb * b, int extra) {
+    int needed = b->count + extra + 1;
+    if (needed > b->capacity) {
+        b->capacity = needed * 2;
+        if (b->data) {
+            b->data = (char *)sb_oom(realloc(b->data, b->capacity));
+        } else {
+            b->data = (char *)sb_oom(malloc(b->capacity));
+            b->data[0] = 0;
+        }
+    }
+}
+
+static void sb_put(struct sb * b, const char * d, int bytes) {
+    sb_grow(b, bytes);
+    memcpy(b->data + b->count, d, bytes);
+    b->count = b->count + bytes;
+    b->data[b->count] = '\0';
+}
+
+static void sb_puts(struct sb * b, const char * s) {
+    if (s) { sb_put(b, s, (int)strlen(s)); }
+}
+
+static void sb_putc(struct sb * b, char c) { sb_put(b, &c, 1); }
+
+static void sb_free(struct sb * b) {
+    if (b->data) { free(b->data); }
+    b->data = 0;
+    b->count = 0;
+    b->capacity = 0;
+}
 
 static void cx_err(char * s) {
     write(2, s, strlen(s));
@@ -109,28 +162,6 @@ static int cx_openrd(char * path) {
     return fd;
 }
 
-static char * readall(char * path, int * lenp) {
-    int fd = open(path, 0);
-    char * buf = 0;
-    if (fd < 0) {
-        cx_err("readall: cannot open ");
-        cx_err(path);
-        cx_err("\n");
-    }
-    if (fd >= 0) {
-        int sz = lseek(fd, 0, 2);
-        lseek(fd, 0, 0);
-        buf = (char*)malloc(sz + 1);
-        int n = read(fd, buf, sz);
-        buf[n] = 0;
-        if (lenp) {
-            *lenp = n;
-        }
-        close(fd);
-    }
-    return buf;
-}
-
 struct lines {
     char ** data;
     int * lens;
@@ -141,14 +172,14 @@ struct lines {
 static void lines_init(struct lines * l) {
     l->cap = 64;
     l->count = 0;
-    l->data = (char**)malloc(l->cap * sizeof(int));
-    l->lens = (int*)malloc(l->cap * sizeof(int));
+    l->data = (char**)malloc(l->cap * 8);
+    l->lens = (int*)malloc(l->cap * 8);
 }
 
 static void lines_grow(struct lines * l) {
     int nc = l->cap * 2;
-    l->data = (char**)realloc(l->data, nc * sizeof(int));
-    l->lens = (int*)realloc(l->lens, nc * sizeof(int));
+    l->data = (char**)realloc(l->data, nc * 8);
+    l->lens = (int*)realloc(l->lens, nc * 8);
     l->cap = nc;
 }
 
@@ -1849,53 +1880,39 @@ static int cmd_xargs(int argc, char ** argv) {
     int rc = 0;
     if (argc < 2) {
         cx_err("xargs: usage: xargs CMD [ARGS...]\n");
-        rc = 1;
+        return 1;
     }
-    if (!rc) {
-        char input[16384];
-        int total = 0;
-        int n = read(0, input + total, 16384 - total - 1);
-        while (n > 0 && total < 16383) {
-            total += n;
-            n = read(0, input + total, 16384 - total - 1);
-        }
-        input[total] = 0;
-        char cmdline[16384];
-        int cl = 0;
-        int j = 1;
-        while (j < argc && cl < 16000) {
-            int al = strlen(argv[j]);
-            if (cl + al < 16000) {
-                memcpy(cmdline + cl, argv[j], al);
-                cl += al;
-                cmdline[cl] = ' ';
-                cl++;
-            }
-            j++;
-        }
-        int p = 0;
-        while (p < total && cl < 16000) {
-            while (p < total && (input[p] == ' ' ||
-                   input[p] == '\t' || input[p] == '\n')) {
+    struct sb sb_input;
+    memset(&sb_input, 0, sizeof(struct sb));
+    char buf[4096];
+    int n;
+    while ((n = read(0, buf, 4096)) > 0) {
+        sb_put(&sb_input, buf, n);
+    }
+    struct sb sb_cmd;
+    memset(&sb_cmd, 0, sizeof(struct sb));
+    int j = 1;
+    while (j < argc) {
+        if (j > 1) { sb_putc(&sb_cmd, ' '); }
+        sb_puts(&sb_cmd, argv[j]);
+        j++;
+    }
+    if (sb_input.data) {
+        char * p = sb_input.data;
+        while (*p) {
+            while (*p && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) { p++; }
+            if (!*p) { break; }
+            sb_putc(&sb_cmd, ' ');
+            while (*p && !(*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) {
+                sb_putc(&sb_cmd, *p);
                 p++;
             }
-            int wstart = p;
-            while (p < total && input[p] != ' ' &&
-                   input[p] != '\t' && input[p] != '\n') {
-                p++;
-            }
-            int wlen = p - wstart;
-            if (wlen > 0 && cl + wlen + 1 < 16000) {
-                memcpy(cmdline + cl, input + wstart, wlen);
-                cl += wlen;
-                cmdline[cl] = ' ';
-                cl++;
-            }
         }
-        cmdline[cl] = 0;
-        int sysrc = system(cmdline);
-        rc = sysrc / 256;
     }
+    int sysrc = system(sb_cmd.data ? sb_cmd.data : "");
+    rc = sysrc / 256;
+    sb_free(&sb_input);
+    sb_free(&sb_cmd);
     return rc;
 }
 
@@ -2064,7 +2081,7 @@ enum {
 };
 
 char sh_tok_buf[16384];
-int sh_tok_types[64];
+int64_t sh_tok_types[64];
 int sh_tok_count = 0;
 char sh_var_names[4096];
 char sh_var_vals[16384];
@@ -2259,23 +2276,16 @@ static cmd_fn sh_find_cmd(char * name) {
 }
 
 static int sh_run_external(int argc, char ** argv) {
-    char cmdline[4096];
-    int cl = 0;
+    struct sb sb_cmd;
+    memset(&sb_cmd, 0, sizeof(struct sb));
     int j = 0;
-    while (j < argc && cl < 4000) {
-        if (j > 0) {
-            cmdline[cl] = ' ';
-            cl++;
-        }
-        int al = strlen(argv[j]);
-        if (cl + al < 4000) {
-            memcpy(cmdline + cl, argv[j], al);
-            cl += al;
-        }
+    while (j < argc) {
+        if (j > 0) { sb_putc(&sb_cmd, ' '); }
+        sb_puts(&sb_cmd, argv[j]);
         j++;
     }
-    cmdline[cl] = 0;
-    int wstatus = system(cmdline);
+    int wstatus = system(sb_cmd.data ? sb_cmd.data : "");
+    sb_free(&sb_cmd);
     return wstatus / 256;
 }
 
@@ -2387,10 +2397,10 @@ static int sh_exec_segment(int start, int end) {
                 cx_err("\n");
                 rc = 1;
             } else {
-                char * sb = (char*)malloc(16384);
-                int * st = (int*)malloc(64 * 8);
-                memcpy(sb, sh_tok_buf, 16384);
-                memcpy(st, sh_tok_types, 64 * 8);
+                char * sb_back = (char*)malloc(16384);
+                int64_t * st = (int64_t*)malloc(512);
+                memcpy(sb_back, sh_tok_buf, 16384);
+                memcpy(st, sh_tok_types, 512);
                 int sc = sh_tok_count;
                 char line[4096];
                 int n = cx_getline(fd, line, 4096);
@@ -2400,10 +2410,10 @@ static int sh_exec_segment(int start, int end) {
                     n = cx_getline(fd, line, 4096);
                 }
                 close(fd);
-                memcpy(sh_tok_buf, sb, 16384);
-                memcpy(sh_tok_types, st, 64 * 8);
+                memcpy(sh_tok_buf, sb_back, 16384);
+                memcpy(sh_tok_types, st, 512);
                 sh_tok_count = sc;
-                free(sb);
+                free(sb_back);
                 free(st);
                 rc = sh_last_rc;
             }
@@ -2543,7 +2553,19 @@ static void sh_run_tokens(int start, int end) {
 static int cmd_date(int argc, char ** argv) {
     int t = time(0);
     int res[6];
+#ifdef __cx__
     if (localtime(t, res) == 0) {
+#else
+    time_t tt = t;
+    struct tm *lt = localtime(&tt);
+    if (lt) {
+        res[0] = lt->tm_year + 1900;
+        res[1] = lt->tm_mon + 1;
+        res[2] = lt->tm_mday;
+        res[3] = lt->tm_hour;
+        res[4] = lt->tm_min;
+        res[5] = lt->tm_sec;
+#endif
         cx_putint(1, res[0]);
         cx_out("-", 1);
         if (res[1] < 10) { cx_out("0", 1); }

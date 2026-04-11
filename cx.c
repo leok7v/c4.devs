@@ -147,7 +147,7 @@ enum {
     Sline, Idsz
 };
 
-void next() {
+void next(void) {
     char *pp;
     int64_t opc; // opcode for -s output, local to avoid clobbering global i
     while ((tk = *p)) {
@@ -448,7 +448,7 @@ void intrinsic(char *name, int64_t opcode) {
     id[Val] = opcode;
 }
 
-void intrinsics() {
+void intrinsics(void) {
     intrinsic("open", I_OPEN);
     intrinsic("read", I_READ);
     intrinsic("close", I_CLOS);
@@ -525,11 +525,11 @@ void expect(int64_t t, char *s) { // expect token t and advance, else fatal
     }
 }
 
-void skip_comma() { if (tk == Comma) { next(); } }
-void skip_const() { while (tk == Const) { next(); } }
+void skip_comma(void) { if (tk == Comma) { next(); } }
+void skip_const(void) { while (tk == Const) { next(); } }
 void require(int64_t t, char *s) { if (tk != t) { fatal(s); } }
 
-void load() { // emit load instruction based on ty
+void load(void) { // emit load instruction based on ty
     if (ty == CHAR) { *++e = LC;
     } else if (ty == INT32) { *++e = LI32;
     } else if (ty > INT64 && ty < FNPTR) { // struct: keep address
@@ -537,7 +537,7 @@ void load() { // emit load instruction based on ty
     }
 }
 
-void store() { // emit store instruction based on ty
+void store(void) { // emit store instruction based on ty
     if (ty == CHAR) {
         *++e = SC;
     } else if (ty == INT32) {
@@ -557,7 +557,7 @@ void store() { // emit store instruction based on ty
     }
 }
 
-void member() { // member access
+void member(void) { // member access
     require(Id, "bad struct member");
     int64_t *s = (int64_t *)struct_syms[ty - INT64 - 1];
     int64_t *m = (int64_t *)s[Sline];
@@ -635,14 +635,14 @@ void sub(int64_t t) { // pointer-aware subtraction
     }
 }
 
-void number() {
+void number(void) {
     *++e = IMM;
     *++e = ival;
     next();
     ty = INT64;
 }
 
-void string_literal() {
+void string_literal(void) {
     char *first, *ptrs[64], *result, *dst, *src;
     int n, i;
     first = (char *)ival;
@@ -675,7 +675,7 @@ void string_literal() {
     ty = PTR;
 }
 
-void size_of() {
+void size_of(void) {
     expect('(', "open paren expected in sizeof");
     ty = INT64;
     skip_const();
@@ -702,9 +702,9 @@ void size_of() {
 }
 
 void expression(int64_t lev);
-void statement();
+void statement(void);
 
-void if_stmt() {
+void if_stmt(void) {
     int64_t *b;
     expect('(', "open paren expected");
     expression(Comma);
@@ -722,7 +722,7 @@ void if_stmt() {
     *b = (int64_t)((char *)(e + 1) - (char *)b);
 }
 
-void while_stmt() {
+void while_stmt(void) {
     int64_t *a, *b, j;
     int64_t saved_brk_sp, saved_cnt_sp;
     a = e + 1;
@@ -748,7 +748,7 @@ void while_stmt() {
     brk_sp = saved_brk_sp;
 }
 
-void do_while_stmt() {
+void do_while_stmt(void) {
     int64_t *a, j, inc_top;
     int64_t saved_brk_sp, saved_cnt_sp;
     a = e + 1;
@@ -782,7 +782,7 @@ void do_while_stmt() {
     brk_sp = saved_brk_sp;
 }
 
-void switch_stmt() {
+void switch_stmt(void) {
     int64_t *b, *break_stack[256], **break_sp, case_val;
     expect('(', "open paren expected");
     expression(Comma);
@@ -839,7 +839,7 @@ void switch_stmt() {
     *++e = 1;
 }
 
-void return_stmt() {
+void return_stmt(void) {
     if (tk != ';') {
         expression(Comma);
         if (fn_ret_ty > INT64 && fn_ret_ty < FNPTR) {
@@ -1347,7 +1347,7 @@ void expression(int64_t lev) {
     }
 }
 
-void statement() {
+void statement(void) {
     int64_t *a, *b, *d;
     if (tk == If) {
         next();
@@ -2074,7 +2074,7 @@ int pp_get_ident(char *s, int *len) {
     return start;
 }
 
-int pp_active() {
+int pp_active(void) {
     if (pp_cond_sp == 0) { return 1; }
     return pp_cond[pp_cond_sp - 1];
 }
@@ -2167,41 +2167,6 @@ char *pp_embed(char *out, char *file, int add_null) {
     }
     free(buf);
     return out;
-}
-
-// OS detection: set at startup based on runtime check
-int64_t pp_os_is_linux;
-int64_t pp_os_is_apple;
-int64_t pp_os_is_windows;
-
-int pp_os_check(char *name, int len) {
-    if (pp_streq(name, len, "linux", 5)) { return pp_os_is_linux; }
-    if (pp_streq(name, len, "apple", 5)) { return pp_os_is_apple; }
-    if (pp_streq(name, len, "windows", 7)) { return pp_os_is_windows; }
-    return 0;
-}
-
-void pp_os_init() {
-    pp_os_is_linux = 0;
-    pp_os_is_apple = 0;
-    pp_os_is_windows = 0;
-    // Try to detect OS via uname - if it exists, we're on Linux/Unix
-    // Simple heuristic: check if /proc exists (Linux-specific)
-    int fd = open("/proc/version", 0);
-    if (fd >= 0) {
-        pp_os_is_linux = 1;
-        close(fd);
-        return;
-    }
-    // Check for macOS
-    fd = open("/System/Library", 0);
-    if (fd >= 0) {
-        pp_os_is_apple = 1;
-        close(fd);
-        return;
-    }
-    // Otherwise assume Linux for now (most common case for cx)
-    pp_os_is_linux = 1;
 }
 
 char *preprocess(char *src, int srclen, char *out, char *filename, int depth) {
@@ -2320,13 +2285,7 @@ char *preprocess(char *src, int srclen, char *out, char *filename, int depth) {
             } else if (pp_streq(s + dstart, dlen, "if", 2)) {
                 pos = pos + pp_skip_ws(s + pos);
                 int cond_result = 0;
-                // check for os(name)
-                if (pp_streq(s + pos, 2, "os", 2) && s[pos + 2] == '(') {
-                    int pstart = pos + 3;
-                    int pend = pstart;
-                    while (pend < linelen && s[pend] != ')') { pend++; }
-                    cond_result = pp_os_check(s + pstart, pend - pstart);
-                } else if (s[pos] == '0') {
+                if (s[pos] == '0') {
                     cond_result = 0;
                 } else if (s[pos] == '1') {
                     cond_result = 1;
@@ -2342,12 +2301,7 @@ char *preprocess(char *src, int srclen, char *out, char *filename, int depth) {
                 if (pp_cond_sp > 0 && !pp_cond[pp_cond_sp - 1]) {
                     pos = pos + pp_skip_ws(s + pos);
                     int cond_result = 0;
-                    if (pp_streq(s + pos, 2, "os", 2) && s[pos + 2] == '(') {
-                        int pstart = pos + 3;
-                        int pend = pstart;
-                        while (pend < linelen && s[pend] != ')') { pend++; }
-                        cond_result = pp_os_check(s + pstart, pend - pstart);
-                    } else if (s[pos] == '1') {
+                    if (s[pos] == '1') {
                         cond_result = 1;
                     }
                     int parent = pp_cond_sp > 1 ? pp_cond[pp_cond_sp - 2] : 1;
@@ -2556,7 +2510,7 @@ void add_symbol(char *name, int64_t val) {
     id[Val] = val;
 }
 
-void init_definitions() {
+void init_definitions(void) {
     // Use the host's actual header values rather than hardcoded literals,
     // so cx-compiled programs see the correct bit patterns for whatever
     // platform built cx. macOS and Linux disagree on nearly every bit here
@@ -2645,8 +2599,16 @@ int64_t *compile(char *filename) {
     pp_count = 0;
     pp_cond_sp = 0;
     pp_once_count = 0;
-    pp_os_init();
     pp_define("__cx__", 6, "1", 1, -1);
+#ifdef __linux__
+    pp_define("__linux__", 9, "1", 1, -1);
+#endif
+#ifdef __APPLE__
+    pp_define("__APPLE__", 9, "1", 1, -1);
+#endif
+#ifdef _WIN32
+    pp_define("_WIN32", 6, "1", 1, -1);
+#endif
     // process -D command line defines
     int di = 0;
     while (di < cmdline_def_count) {
