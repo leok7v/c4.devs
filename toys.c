@@ -2624,12 +2624,33 @@ static int cmd_kill(int argc, char ** argv) {
 }
 
 static int cmd_sh(int argc, char ** argv) {
+    int fd = 0;
+    if (argc > 1) {
+        if (strcmp(argv[1], "-c") == 0) {
+            if (argc > 2) {
+                sh_tokenize(argv[2]);
+                sh_run_tokens(0, sh_tok_count);
+                return sh_last_rc;
+            }
+            return 0;
+        }
+        fd = open(argv[1], 0);
+        if (fd < 0) {
+            cx_err("sh: cannot open ");
+            cx_err(argv[1]);
+            cx_err("\n");
+            return 1;
+        }
+    }
     char line[4096];
-    int n = cx_getline(0, line, 4096);
+    int n = cx_getline(fd, line, 4096);
     while (n > 0) {
         sh_tokenize(line);
         sh_run_tokens(0, sh_tok_count);
-        n = cx_getline(0, line, 4096);
+        n = cx_getline(fd, line, 4096);
+    }
+    if (fd > 0) {
+        close(fd);
     }
     return sh_last_rc;
 }
