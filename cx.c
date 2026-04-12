@@ -33,6 +33,8 @@
 #include <dirent.h>
 #include <signal.h>
 #include <time.h>
+#include <termios.h>
+#include <sys/ioctl.h>
 #endif
 
 char *p, *lp, // current position in source code
@@ -132,7 +134,7 @@ enum {
     I_CHMOD, I_LINK, I_SYMLNK,
     I_DUP2, I_PIPE,
     I_TIME, I_LTIME, I_SLEEP, I_KILL,
-    I_REALLOC,
+    I_REALLOC, I_ISATTY, I_TERMRAW, I_WINSZ,
     I_VSTRT, I_VEND, I_VCPY, I_VSNPF,
     I_LAST
 };
@@ -511,6 +513,9 @@ void intrinsics(void) {
     intrinsic("sleep", I_SLEEP);
     intrinsic("kill", I_KILL);
     intrinsic("realloc", I_REALLOC);
+    intrinsic("isatty", I_ISATTY);
+    intrinsic("termraw", I_TERMRAW);
+    intrinsic("winsize", I_WINSZ);
     intrinsic("va_start", I_VSTRT);
     intrinsic("va_end", I_VEND);
     intrinsic("va_copy", I_VCPY);
@@ -3504,6 +3509,15 @@ static int64_t rt_vsnprintf(char *str, int64_t size, const char *fmt,
     return n;
 }
 
+#ifndef __cx__
+static struct termios termraw_orig;
+static int termraw_saved;
+static void termraw_atexit(void) {
+    if (termraw_saved) tcsetattr(0, TCSAFLUSH, &termraw_orig);
+}
+static void sigwinch_handler(int sig) { (void)sig; }
+#endif
+
 int run(int64_t *pc_offset, int argc, char **argv) {
     int64_t *sp, *bp, *t, *pc, a, cycle;
     pc = (int64_t *)((char *)code_base + (int64_t)pc_offset);
@@ -3736,6 +3750,51 @@ int run(int64_t *pc_offset, int argc, char **argv) {
             case I_SLEEP: a = sleep((int)*sp); break;
             case I_KILL: a = kill((int)sp[1], (int)*sp); break;
             case I_REALLOC: a = (int64_t)realloc((void *)sp[1], *sp); break;
+            case I_ISATTY: a = isatty((int)*sp); break;
+#ifndef __cx__
+            case I_TERMRAW: {
+                int fd = (int)sp[1];
+                int enable = (int)*sp;
+                if (enable) {
+                    if (!termraw_saved) {
+                        tcgetattr(fd, &termraw_orig);
+                        atexit(termraw_atexit);
+                        termraw_saved = 1;
+                    }
+                    struct termios raw = termraw_orig;
+                    raw.c_lflag &= ~(ECHO | ICANON | IEXTEN | ISIG);
+                    raw.c_cc[VMIN] = 1;
+                    raw.c_cc[VTIME] = 0;
+                    a = tcsetattr(fd, TCSAFLUSH, &raw);
+                    struct sigaction sa;
+                    memset(&sa, 0, sizeof(sa));
+                    sa.sa_handler = sigwinch_handler;
+                    sigaction(SIGWINCH, &sa, 0);
+                } else {
+                    if (termraw_saved) {
+                        a = tcsetattr(fd, TCSAFLUSH, &termraw_orig);
+                    } else {
+                        a = 0;
+                    }
+                    signal(SIGWINCH, SIG_DFL);
+                }
+                break;
+            }
+            case I_WINSZ: {
+                struct winsize ws;
+                int r = ioctl((int)sp[1], TIOCGWINSZ, &ws);
+                if (r == 0) {
+                    int64_t *out = (int64_t*)*sp;
+                    out[0] = (int64_t)ws.ws_row;
+                    out[1] = (int64_t)ws.ws_col;
+                }
+                a = r;
+                break;
+            }
+#else
+            case I_TERMRAW: a = termraw((int)sp[1], (int)*sp); break;
+            case I_WINSZ: a = winsize((int)sp[1], (char*)*sp); break;
+#endif
             case I_VSTRT: a = *sp + 8; break;
             case I_VEND:  break;
             case I_VCPY:  a = *sp; break;

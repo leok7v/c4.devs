@@ -14,6 +14,39 @@
 #include <time.h>
 #include <stdarg.h>
 #include <stdint.h>
+#include <termios.h>
+#include <sys/ioctl.h>
+static struct termios _tr_orig;
+static int _tr_saved;
+static void _sigwinch(int sig) { (void)sig; }
+static int winsize(int fd, int *buf) {
+    struct winsize ws;
+    int r = ioctl(fd, TIOCGWINSZ, &ws);
+    if (r == 0) { buf[0] = ws.ws_row; buf[1] = ws.ws_col; }
+    return r;
+}
+static int termraw(int fd, int enable) {
+    if (enable) {
+        if (!_tr_saved) {
+            tcgetattr(fd, &_tr_orig);
+            _tr_saved = 1;
+        }
+        struct termios raw = _tr_orig;
+        raw.c_lflag &= ~(ECHO | ICANON | IEXTEN | ISIG);
+        raw.c_cc[VMIN] = 1;
+        raw.c_cc[VTIME] = 0;
+        struct sigaction sa;
+        memset(&sa, 0, sizeof(sa));
+        sa.sa_handler = _sigwinch;
+        sigaction(SIGWINCH, &sa, 0);
+        return tcsetattr(fd, TCSAFLUSH, &raw);
+    }
+    if (_tr_saved) {
+        signal(SIGWINCH, SIG_DFL);
+        return tcsetattr(fd, TCSAFLUSH, &_tr_orig);
+    }
+    return 0;
+}
 #endif
 
 #ifndef S_ISDIR
@@ -2727,6 +2760,215 @@ static int cmd_kill(int argc, char ** argv) {
     return 0;
 }
 
+// --- Shell history and line editing ---
+
+#define RL_HIST_MAX 64
+#define RL_HIST_LEN 1024
+
+char rl_hist[65536]; // RL_HIST_MAX * RL_HIST_LEN
+int rl_hist_count;
+
+static void rl_hist_add(char * line) {
+    if (line[0] == 0) return;
+    if (rl_hist_count > 0) {
+        char * last = rl_hist + (rl_hist_count - 1) * RL_HIST_LEN;
+        if (strcmp(last, line) == 0) return;
+    }
+    if (rl_hist_count >= RL_HIST_MAX) {
+        memmove(rl_hist, rl_hist + RL_HIST_LEN,
+                (RL_HIST_MAX - 1) * RL_HIST_LEN);
+        rl_hist_count = RL_HIST_MAX - 1;
+    }
+    strcpy(rl_hist + rl_hist_count * RL_HIST_LEN, line);
+    rl_hist_count++;
+}
+
+static void rl_esc(char c) {
+    char buf[3];
+    buf[0] = 27;
+    buf[1] = '[';
+    buf[2] = c;
+    write(2, buf, 3);
+}
+
+static void rl_esc_n(int n, char c) {
+    char buf[16];
+    char nb[8];
+    buf[0] = 27;
+    buf[1] = '[';
+    int len = cx_itoa(n, nb);
+    memcpy(buf + 2, nb, len);
+    buf[2 + len] = c;
+    write(2, buf, 3 + len);
+}
+
+static void rl_redraw(char * prompt, int plen, char * buf,
+                       int len, int pos) {
+    write(2, "\r", 1);
+    write(2, prompt, plen);
+    if (len > 0) { write(2, buf, len); }
+    rl_esc('K');
+    write(2, "\r", 1);
+    if (plen + pos > 0) { rl_esc_n(plen + pos, 'C'); }
+}
+
+static int sh_readline(char * buf, int size, char * prompt) {
+    int plen = strlen(prompt);
+    int len = 0;
+    int pos = 0;
+    int hi = rl_hist_count;
+    char saved[1024];
+    saved[0] = 0;
+    buf[0] = 0;
+    write(2, prompt, plen);
+    termraw(0, 1);
+    char ch[2];
+    int done = 0;
+    int result = 0;
+    while (!done) {
+        ch[0] = 0;
+        ch[1] = 0;
+        int n = read(0, ch, 1);
+        if (n <= 0) {
+            result = -1;
+            done = 1;
+        } else if (ch[0] == 13 || ch[0] == 10) {
+            write(2, "\r\n", 2);
+            buf[len] = 0;
+            if (len > 0) { rl_hist_add(buf); }
+            result = len;
+            done = 1;
+        } else if (ch[0] == 4 && len == 0) {
+            write(2, "\r\n", 2);
+            result = -1;
+            done = 1;
+        } else if (ch[0] == 4 && pos < len) {
+            memmove(buf + pos, buf + pos + 1, len - pos - 1);
+            len--;
+            buf[len] = 0;
+            rl_redraw(prompt, plen, buf, len, pos);
+        } else if (ch[0] == 3) {
+            len = 0;
+            pos = 0;
+            buf[0] = 0;
+            termraw(0, 0);
+            write(2, "^C\r\n", 4);
+            write(2, prompt, plen);
+            termraw(0, 1);
+        } else if (ch[0] == 1) {
+            pos = 0;
+            rl_redraw(prompt, plen, buf, len, pos);
+        } else if (ch[0] == 5) {
+            pos = len;
+            rl_redraw(prompt, plen, buf, len, pos);
+        } else if (ch[0] == 21) {
+            memmove(buf, buf + pos, len - pos);
+            len = len - pos;
+            pos = 0;
+            buf[len] = 0;
+            rl_redraw(prompt, plen, buf, len, pos);
+        } else if (ch[0] == 11) {
+            len = pos;
+            buf[len] = 0;
+            rl_redraw(prompt, plen, buf, len, pos);
+        } else if (ch[0] == 12) {
+            char cls[7];
+            cls[0] = 27; cls[1] = '['; cls[2] = '2'; cls[3] = 'J';
+            cls[4] = 27; cls[5] = '['; cls[6] = 'H';
+            write(2, cls, 7);
+            rl_redraw(prompt, plen, buf, len, pos);
+        } else if (ch[0] == 127 || ch[0] == 8) {
+            if (pos > 0) {
+                memmove(buf + pos - 1, buf + pos, len - pos);
+                pos--;
+                len--;
+                buf[len] = 0;
+                rl_redraw(prompt, plen, buf, len, pos);
+            }
+        } else if (ch[0] == 27) {
+            ch[0] = 0;
+            n = read(0, ch, 1);
+            if (n > 0 && ch[0] == '[') {
+                ch[0] = 0;
+                n = read(0, ch, 1);
+                if (n > 0) {
+                    int c = ch[0];
+                    if (c == 'A' && hi > 0) {
+                        if (hi == rl_hist_count) {
+                            memcpy(saved, buf, len + 1);
+                        }
+                        hi--;
+                        strcpy(buf, rl_hist + hi * RL_HIST_LEN);
+                        len = strlen(buf);
+                        pos = len;
+                        rl_redraw(prompt, plen, buf, len, pos);
+                    } else if (c == 'B' && hi < rl_hist_count) {
+                        hi++;
+                        if (hi == rl_hist_count) {
+                            memcpy(buf, saved, strlen(saved) + 1);
+                        } else {
+                            strcpy(buf, rl_hist + hi * RL_HIST_LEN);
+                        }
+                        len = strlen(buf);
+                        pos = len;
+                        rl_redraw(prompt, plen, buf, len, pos);
+                    } else if (c == 'C' && pos < len) {
+                        pos++;
+                        rl_esc('C');
+                    } else if (c == 'D' && pos > 0) {
+                        pos--;
+                        rl_esc('D');
+                    } else if (c == 'H') {
+                        pos = 0;
+                        rl_redraw(prompt, plen, buf, len, pos);
+                    } else if (c == 'F') {
+                        pos = len;
+                        rl_redraw(prompt, plen, buf, len, pos);
+                    } else if (c == '3') {
+                        ch[0] = 0;
+                        n = read(0, ch, 1);
+                        if (n > 0 && ch[0] == '~' && pos < len) {
+                            memmove(buf + pos, buf + pos + 1,
+                                    len - pos - 1);
+                            len--;
+                            buf[len] = 0;
+                            rl_redraw(prompt, plen, buf, len, pos);
+                        }
+                    }
+                }
+            }
+        } else if (ch[0] >= 32 && len < size - 1) {
+            if (pos < len) {
+                memmove(buf + pos + 1, buf + pos, len - pos);
+            }
+            buf[pos] = ch[0];
+            pos++;
+            len++;
+            buf[len] = 0;
+            rl_redraw(prompt, plen, buf, len, pos);
+        }
+    }
+    termraw(0, 0);
+    return result;
+}
+
+static int cmd_help(int argc, char ** argv) {
+    int i = 0;
+    while (i < ncmds) {
+        cx_err(cmds[i].help);
+        cx_err("\n");
+        i++;
+    }
+    return 0;
+}
+
+static int cmd_exit(int argc, char ** argv) {
+    int code = 0;
+    if (argc > 1) { code = atoi(argv[1]); }
+    exit(code);
+    return 0;
+}
+
 static int cmd_sh(int argc, char ** argv) {
     int fd = 0;
     if (argc > 1) {
@@ -2746,15 +2988,27 @@ static int cmd_sh(int argc, char ** argv) {
             return 1;
         }
     }
+    int interactive = (fd == 0 && isatty(0));
     char line[4096];
-    int n = cx_getline(fd, line, 4096);
-    while (n > 0) {
-        sh_tokenize(line);
-        sh_run_tokens(0, sh_tok_count);
-        n = cx_getline(fd, line, 4096);
-    }
-    if (fd > 0) {
-        close(fd);
+    if (interactive) {
+        int n = sh_readline(line, 4096, "$ ");
+        while (n >= 0) {
+            if (n > 0) {
+                sh_tokenize(line);
+                sh_run_tokens(0, sh_tok_count);
+            }
+            n = sh_readline(line, 4096, "$ ");
+        }
+    } else {
+        int n = cx_getline(fd, line, 4096);
+        while (n > 0) {
+            sh_tokenize(line);
+            sh_run_tokens(0, sh_tok_count);
+            n = cx_getline(fd, line, 4096);
+        }
+        if (fd > 0) {
+            close(fd);
+        }
     }
     return sh_last_rc;
 }
@@ -2814,6 +3068,8 @@ static void setup(void) {
     cmd_reg("sleep", cmd_sleep, "sleep SECONDS");
     cmd_reg("kill", cmd_kill, "kill [-SIG] PID");
     cmd_reg("sh", cmd_sh, "sh [-c COMMAND] [SCRIPT]");
+    cmd_reg("help", cmd_help, "help");
+    cmd_reg("exit", cmd_exit, "exit [CODE]");
 }
 
 static int dispatch(char * name, int argc, char ** argv) {
@@ -2847,19 +3103,9 @@ static int dispatch(char * name, int argc, char ** argv) {
 }
 
 int main(int argc, char ** argv) {
-    int rc = 0;
     setup();
     if (argc < 2) {
-        int i = 0;
-        while (i < ncmds) {
-            cx_puts(cmds[i].name);
-            cx_out("\n", 1);
-            i++;
-        }
-        rc = 1;
+        return cmd_sh(1, argv);
     }
-    if (!rc) {
-        rc = dispatch(argv[1], argc - 1, argv + 1);
-    }
-    return rc;
+    return dispatch(argv[1], argc - 1, argv + 1);
 }
