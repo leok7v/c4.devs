@@ -971,7 +971,18 @@ between platforms and cx code should not care.
     [x] cx self-hosts cleanly — test/tests.c runs every test twice (native
         and cx-on-cx), 45/45 passing on both paths. See MEMORY.md for the
         five bugs that had to be fixed to get here.
-    [ ] Stage 6 — stretch goals: ps, bytecode executables, warm VM, regex engine, full sed
+    [ ] Stage 6 — stretch goals: ps, regex engine, full sed
+    [x] Stage 7 — interactive shell: readline with history/arrows,
+        isatty/termraw/winsize intrinsics, help/exit builtins,
+        toys invoked bare enters sh mode (warm VM)
+    [ ] Stage 7 — vi: minimal screen editor (insert/normal/ex modes,
+        arrows, dd, x, A, I, o/O, /search, :w :wq :q!)
+    [ ] Stage 8 — cx as embedded interpreter:
+        (a) toys assumes a cx binary lives next to argv[0] and
+            offers "cx" as a builtin that runs any file.c with main()
+        (b) chmod +x file.c makes .c files directly executable
+            (shebang: #!/usr/bin/env cx)
+        (c) shell prompt shows basename of cwd (e.g. "c4.devs$ ")
 
 ---
 
