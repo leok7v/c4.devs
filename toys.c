@@ -2952,6 +2952,664 @@ static int sh_readline(char * buf, int size, char * prompt) {
     return result;
 }
 
+// ====================== vi editor ======================
+
+#define VI_MAXLN 4096
+#define VI_NORMAL 0
+#define VI_INSERT 1
+#define VI_EX 2
+#define VK_UP    256
+#define VK_DOWN  257
+#define VK_RIGHT 258
+#define VK_LEFT  259
+#define VK_HOME  260
+#define VK_END   261
+#define VK_DEL   262
+#define VK_PGUP  263
+#define VK_PGDN  264
+
+char * vi_ld[4096];
+int vi_ll[4096];
+int vi_lc[4096];
+int vi_nl;
+int vi_cx;
+int vi_cy;
+int vi_top;
+int vi_left;
+int vi_rows;
+int vi_cols;
+int vi_mode;
+int vi_dirty;
+int vi_run;
+int vi_pend;
+int vi_pb;
+char vi_file[256];
+char vi_msg[256];
+char vi_ex_buf[256];
+int vi_ex_len;
+int vi_ex_pr;
+char vi_srch[256];
+char vi_scr[32768];
+int vi_sn;
+
+static void vi_sput(char * s, int n) {
+    if (vi_sn + n < 32768) {
+        memcpy(vi_scr + vi_sn, s, n);
+        vi_sn = vi_sn + n;
+    }
+}
+
+static void vi_sputs(char * s) { vi_sput(s, strlen(s)); }
+
+static void vi_sflush(void) {
+    if (vi_sn > 0) { write(1, vi_scr, vi_sn); vi_sn = 0; }
+}
+
+static void vi_sputc(int c) {
+    if (vi_sn < 32767) { vi_scr[vi_sn] = c; vi_sn++; }
+}
+
+static void vi_sesc(char * s) {
+    vi_sputc(27);
+    vi_sputs(s);
+}
+
+static void vi_sgoto(int row, int col) {
+    char b[24];
+    char n1[8];
+    char n2[8];
+    b[0] = 27; b[1] = '[';
+    int l1 = cx_itoa(row + 1, n1);
+    memcpy(b + 2, n1, l1);
+    b[2 + l1] = ';';
+    int l2 = cx_itoa(col + 1, n2);
+    memcpy(b + 3 + l1, n2, l2);
+    b[3 + l1 + l2] = 'H';
+    vi_sput(b, 4 + l1 + l2);
+}
+
+// --- vi line management ---
+
+static void vi_lensure(int i, int need) {
+    if (need + 1 > vi_lc[i]) {
+        int cap = vi_lc[i];
+        if (cap < 32) { cap = 32; }
+        while (cap < need + 1) { cap = cap * 2; }
+        vi_ld[i] = (char *)realloc(vi_ld[i], cap);
+        vi_lc[i] = cap;
+    }
+}
+
+static void vi_ladd(int at, char * text, int len) {
+    if (vi_nl >= VI_MAXLN) return;
+    int i = vi_nl;
+    while (i > at) {
+        vi_ld[i] = vi_ld[i - 1];
+        vi_ll[i] = vi_ll[i - 1];
+        vi_lc[i] = vi_lc[i - 1];
+        i--;
+    }
+    int cap = 32;
+    while (cap < len + 1) { cap = cap * 2; }
+    char * p = (char *)malloc(cap);
+    if (len > 0) { memcpy(p, text, len); }
+    p[len] = 0;
+    vi_ld[at] = p;
+    vi_lc[at] = cap;
+    vi_ll[at] = len;
+    vi_nl++;
+}
+
+static void vi_ldel(int at) {
+    if (vi_nl <= 1) {
+        vi_ld[0][0] = 0;
+        vi_ll[0] = 0;
+        return;
+    }
+    free(vi_ld[at]);
+    int i = at;
+    while (i < vi_nl - 1) {
+        vi_ld[i] = vi_ld[i + 1];
+        vi_ll[i] = vi_ll[i + 1];
+        vi_lc[i] = vi_lc[i + 1];
+        i++;
+    }
+    vi_nl--;
+}
+
+static void vi_lfree(void) {
+    int i = 0;
+    while (i < vi_nl) { free(vi_ld[i]); i++; }
+    vi_nl = 0;
+}
+
+// --- vi file I/O ---
+
+static int vi_load(char * filename) {
+    strcpy(vi_file, filename);
+    int fd = open(filename, 0);
+    if (fd < 0) {
+        vi_ladd(0, "", 0);
+        strcpy(vi_msg, "[New file]");
+        return 0;
+    }
+    int sz = lseek(fd, 0, 2);
+    lseek(fd, 0, 0);
+    char * buf = (char *)malloc(sz + 1);
+    read(fd, buf, sz);
+    buf[sz] = 0;
+    close(fd);
+    int start = 0;
+    int i = 0;
+    while (i <= sz) {
+        if (i == sz || buf[i] == 10) {
+            vi_ladd(vi_nl, buf + start, i - start);
+            start = i + 1;
+        }
+        i++;
+    }
+    free(buf);
+    if (vi_nl == 0) { vi_ladd(0, "", 0); }
+    if (vi_nl > 1 && vi_ll[vi_nl - 1] == 0) {
+        free(vi_ld[vi_nl - 1]);
+        vi_nl--;
+    }
+    return 0;
+}
+
+static int vi_save(void) {
+    if (vi_file[0] == 0) {
+        strcpy(vi_msg, "No filename");
+        return -1;
+    }
+    int fd = open(vi_file, 1 | O_CREAT | O_TRUNC, 420);
+    if (fd < 0) {
+        strcpy(vi_msg, "Cannot write");
+        return -1;
+    }
+    int i = 0;
+    int bytes = 0;
+    while (i < vi_nl) {
+        write(fd, vi_ld[i], vi_ll[i]);
+        write(fd, "\n", 1);
+        bytes = bytes + vi_ll[i] + 1;
+        i++;
+    }
+    close(fd);
+    vi_dirty = 0;
+    char nb[16];
+    strcpy(vi_msg, "\"");
+    strcat(vi_msg, vi_file);
+    strcat(vi_msg, "\" ");
+    cx_itoa(vi_nl, nb);
+    strcat(vi_msg, nb);
+    strcat(vi_msg, "L ");
+    cx_itoa(bytes, nb);
+    strcat(vi_msg, nb);
+    strcat(vi_msg, "B written");
+    return 0;
+}
+
+// --- vi terminal and cursor ---
+
+static void vi_getsize(void) {
+    int buf[2];
+    buf[0] = 24; buf[1] = 80;
+    winsize(1, buf);
+    vi_rows = buf[0];
+    vi_cols = buf[1];
+}
+
+static int vi_maxcx(void) {
+    int len = vi_ll[vi_cy];
+    if (vi_mode == VI_INSERT) return len;
+    return len > 0 ? len - 1 : 0;
+}
+
+static void vi_clamp(void) {
+    if (vi_cy < 0) { vi_cy = 0; }
+    if (vi_cy >= vi_nl) { vi_cy = vi_nl - 1; }
+    int mx = vi_maxcx();
+    if (vi_cx > mx) { vi_cx = mx; }
+    if (vi_cx < 0) { vi_cx = 0; }
+}
+
+static void vi_scroll(void) {
+    if (vi_cy < vi_top) { vi_top = vi_cy; }
+    if (vi_cy >= vi_top + vi_rows - 1) {
+        vi_top = vi_cy - vi_rows + 2;
+    }
+    if (vi_cx < vi_left) { vi_left = vi_cx; }
+    if (vi_cx >= vi_left + vi_cols) {
+        vi_left = vi_cx - vi_cols + 1;
+    }
+}
+
+// --- vi rendering ---
+
+static void vi_render(void) {
+    vi_getsize();
+    vi_scroll();
+    vi_sn = 0;
+    vi_sesc("[?25l");
+    vi_sgoto(0, 0);
+    int r = 0;
+    while (r < vi_rows - 1) {
+        int ln = vi_top + r;
+        if (ln < vi_nl) {
+            char * line = vi_ld[ln];
+            int len = vi_ll[ln];
+            int start = vi_left;
+            if (start > len) { start = len; }
+            int show = len - start;
+            if (show > vi_cols) { show = vi_cols; }
+            if (show > 0) { vi_sput(line + start, show); }
+        } else {
+            vi_sputc('~');
+        }
+        vi_sesc("[K");
+        if (r < vi_rows - 2) { vi_sputc(13); vi_sputc(10); }
+        r++;
+    }
+    vi_sgoto(vi_rows - 1, 0);
+    vi_sesc("[7m");
+    if (vi_mode == VI_EX) {
+        vi_sputc(vi_ex_pr);
+        if (vi_ex_len > 0) { vi_sput(vi_ex_buf, vi_ex_len); }
+    } else if (vi_msg[0]) {
+        vi_sputs(vi_msg);
+    } else {
+        if (vi_file[0]) { vi_sputs(vi_file); }
+        else { vi_sputs("[No Name]"); }
+        if (vi_dirty) { vi_sputs(" [+]"); }
+        vi_sputs("  ");
+        char nb[16];
+        cx_itoa(vi_cy + 1, nb); vi_sputs(nb);
+        vi_sputc('/');
+        cx_itoa(vi_nl, nb); vi_sputs(nb);
+        vi_sputs("  Col ");
+        cx_itoa(vi_cx + 1, nb); vi_sputs(nb);
+        if (vi_mode == VI_INSERT) { vi_sputs("  -- INSERT --"); }
+    }
+    vi_sesc("[K");
+    vi_sesc("[0m");
+    if (vi_mode == VI_EX) {
+        vi_sgoto(vi_rows - 1, vi_ex_len + 1);
+    } else {
+        vi_sgoto(vi_cy - vi_top, vi_cx - vi_left);
+    }
+    vi_sesc("[?25h");
+    vi_sflush();
+    vi_msg[0] = 0;
+}
+
+// --- vi key reading ---
+
+static int vi_readkey(void) {
+    if (vi_pb >= 0) {
+        int c = vi_pb;
+        vi_pb = -1;
+        return c;
+    }
+    char ch[2];
+    ch[0] = 0; ch[1] = 0;
+    int n = read(0, ch, 1);
+    if (n <= 0) return -1;
+    if (ch[0] != 27) return ch[0];
+    ch[0] = 0;
+    n = read(0, ch, 1);
+    if (n <= 0) return 27;
+    if (ch[0] != '[') { vi_pb = ch[0]; return 27; }
+    ch[0] = 0;
+    n = read(0, ch, 1);
+    if (n <= 0) return 27;
+    if (ch[0] == 'A') return VK_UP;
+    if (ch[0] == 'B') return VK_DOWN;
+    if (ch[0] == 'C') return VK_RIGHT;
+    if (ch[0] == 'D') return VK_LEFT;
+    if (ch[0] == 'H') return VK_HOME;
+    if (ch[0] == 'F') return VK_END;
+    if (ch[0] == '3') { read(0, ch, 1); return VK_DEL; }
+    if (ch[0] == '5') { read(0, ch, 1); return VK_PGUP; }
+    if (ch[0] == '6') { read(0, ch, 1); return VK_PGDN; }
+    return -1;
+}
+
+// --- vi search ---
+
+static char * vi_strfind(char * s, char * pat) {
+    int pl = strlen(pat);
+    int sl = strlen(s);
+    int i = 0;
+    while (i <= sl - pl) {
+        if (memcmp(s + i, pat, pl) == 0) return s + i;
+        i++;
+    }
+    return 0;
+}
+
+static void vi_search(void) {
+    if (vi_srch[0] == 0) return;
+    int y = vi_cy;
+    int x0 = vi_cx + 1;
+    int wrap = 0;
+    while (1) {
+        char * line = vi_ld[y];
+        int off = (y == vi_cy && !wrap) ? x0 : 0;
+        if (off < vi_ll[y]) {
+            char * f = vi_strfind(line + off, vi_srch);
+            if (f) {
+                vi_cy = y;
+                vi_cx = (int)(f - line);
+                return;
+            }
+        }
+        y++;
+        if (y >= vi_nl) { y = 0; wrap = 1; }
+        if (y == vi_cy && wrap) {
+            strcpy(vi_msg, "Pattern not found");
+            return;
+        }
+    }
+}
+
+// --- vi normal mode ---
+
+static void vi_normal(int k) {
+    if (vi_pend) {
+        int p = vi_pend;
+        vi_pend = 0;
+        if (p == 'd' && k == 'd') {
+            vi_ldel(vi_cy);
+            vi_clamp();
+            vi_dirty = 1;
+        } else if (p == 'g' && k == 'g') {
+            vi_cy = 0;
+            vi_cx = 0;
+        } else if (p == 'Z' && k == 'Z') {
+            if (vi_dirty) { vi_save(); }
+            vi_run = 0;
+        }
+        return;
+    }
+    if (k == 'h' || k == VK_LEFT) {
+        if (vi_cx > 0) vi_cx--;
+    } else if (k == 'l' || k == VK_RIGHT) {
+        if (vi_cx < vi_maxcx()) vi_cx++;
+    } else if (k == 'j' || k == VK_DOWN) {
+        if (vi_cy < vi_nl - 1) vi_cy++;
+        vi_clamp();
+    } else if (k == 'k' || k == VK_UP) {
+        if (vi_cy > 0) vi_cy--;
+        vi_clamp();
+    } else if (k == '0' || k == VK_HOME) {
+        vi_cx = 0;
+    } else if (k == '$' || k == VK_END) {
+        vi_cx = vi_maxcx();
+    } else if (k == '^') {
+        char * line = vi_ld[vi_cy];
+        int i = 0;
+        while (i < vi_ll[vi_cy] && (line[i] == ' ' || line[i] == 9)) i++;
+        vi_cx = i;
+        vi_clamp();
+    } else if (k == 'G') {
+        vi_cy = vi_nl - 1;
+        vi_clamp();
+    } else if (k == 'g') {
+        vi_pend = 'g';
+    } else if (k == 'i') {
+        vi_mode = VI_INSERT;
+    } else if (k == 'I') {
+        char * line = vi_ld[vi_cy];
+        int i = 0;
+        while (i < vi_ll[vi_cy] && (line[i] == ' ' || line[i] == 9)) i++;
+        vi_cx = i;
+        vi_mode = VI_INSERT;
+    } else if (k == 'a') {
+        if (vi_ll[vi_cy] > 0) vi_cx++;
+        if (vi_cx > vi_ll[vi_cy]) vi_cx = vi_ll[vi_cy];
+        vi_mode = VI_INSERT;
+    } else if (k == 'A') {
+        vi_cx = vi_ll[vi_cy];
+        vi_mode = VI_INSERT;
+    } else if (k == 'o') {
+        vi_ladd(vi_cy + 1, "", 0);
+        vi_cy++;
+        vi_cx = 0;
+        vi_mode = VI_INSERT;
+        vi_dirty = 1;
+    } else if (k == 'O') {
+        vi_ladd(vi_cy, "", 0);
+        vi_cx = 0;
+        vi_mode = VI_INSERT;
+        vi_dirty = 1;
+    } else if (k == 'x' || k == VK_DEL) {
+        if (vi_ll[vi_cy] > 0 && vi_cx < vi_ll[vi_cy]) {
+            char * line = vi_ld[vi_cy];
+            memmove(line + vi_cx, line + vi_cx + 1,
+                    vi_ll[vi_cy] - vi_cx);
+            vi_ll[vi_cy]--;
+            vi_dirty = 1;
+            vi_clamp();
+        }
+    } else if (k == 'X') {
+        if (vi_cx > 0) {
+            char * line = vi_ld[vi_cy];
+            vi_cx--;
+            memmove(line + vi_cx, line + vi_cx + 1,
+                    vi_ll[vi_cy] - vi_cx);
+            vi_ll[vi_cy]--;
+            vi_dirty = 1;
+        }
+    } else if (k == 'd') {
+        vi_pend = 'd';
+    } else if (k == 'r') {
+        int nk = vi_readkey();
+        if (nk >= 32 && nk < 127 && vi_cx < vi_ll[vi_cy]) {
+            vi_ld[vi_cy][vi_cx] = nk;
+            vi_dirty = 1;
+        }
+    } else if (k == 'J') {
+        if (vi_cy < vi_nl - 1) {
+            int cl = vi_ll[vi_cy];
+            int nl2 = vi_ll[vi_cy + 1];
+            vi_lensure(vi_cy, cl + 1 + nl2);
+            char * cur = vi_ld[vi_cy];
+            char * nxt = vi_ld[vi_cy + 1];
+            cur[cl] = ' ';
+            memcpy(cur + cl + 1, nxt, nl2);
+            cur[cl + 1 + nl2] = 0;
+            vi_ll[vi_cy] = cl + 1 + nl2;
+            vi_ldel(vi_cy + 1);
+            vi_dirty = 1;
+        }
+    } else if (k == 'Z') {
+        vi_pend = 'Z';
+    } else if (k == ':') {
+        vi_mode = VI_EX;
+        vi_ex_pr = ':';
+        vi_ex_len = 0;
+        vi_ex_buf[0] = 0;
+    } else if (k == '/') {
+        vi_mode = VI_EX;
+        vi_ex_pr = '/';
+        vi_ex_len = 0;
+        vi_ex_buf[0] = 0;
+    } else if (k == 'n') {
+        vi_search();
+    } else if (k == VK_PGUP) {
+        vi_cy = vi_cy - (vi_rows - 1) / 2;
+        vi_clamp();
+    } else if (k == VK_PGDN) {
+        vi_cy = vi_cy + (vi_rows - 1) / 2;
+        vi_clamp();
+    } else if (k == 3) {
+        vi_pend = 0;
+    }
+}
+
+// --- vi insert mode ---
+
+static void vi_insert(int k) {
+    if (k == 27 || k == 3) {
+        vi_mode = VI_NORMAL;
+        if (vi_cx > 0) vi_cx--;
+        vi_clamp();
+        return;
+    }
+    if (k == VK_LEFT) {
+        if (vi_cx > 0) vi_cx--;
+    } else if (k == VK_RIGHT) {
+        if (vi_cx < vi_ll[vi_cy]) vi_cx++;
+    } else if (k == VK_UP) {
+        if (vi_cy > 0) vi_cy--;
+        if (vi_cx > vi_ll[vi_cy]) vi_cx = vi_ll[vi_cy];
+    } else if (k == VK_DOWN) {
+        if (vi_cy < vi_nl - 1) vi_cy++;
+        if (vi_cx > vi_ll[vi_cy]) vi_cx = vi_ll[vi_cy];
+    } else if (k == VK_HOME) {
+        vi_cx = 0;
+    } else if (k == VK_END) {
+        vi_cx = vi_ll[vi_cy];
+    } else if (k == 127 || k == 8) {
+        if (vi_cx > 0) {
+            char * line = vi_ld[vi_cy];
+            memmove(line + vi_cx - 1, line + vi_cx,
+                    vi_ll[vi_cy] - vi_cx + 1);
+            vi_cx--;
+            vi_ll[vi_cy]--;
+            vi_dirty = 1;
+        } else if (vi_cy > 0) {
+            int pl = vi_ll[vi_cy - 1];
+            int cl = vi_ll[vi_cy];
+            vi_lensure(vi_cy - 1, pl + cl);
+            char * prev = vi_ld[vi_cy - 1];
+            char * cur = vi_ld[vi_cy];
+            memcpy(prev + pl, cur, cl);
+            prev[pl + cl] = 0;
+            vi_ll[vi_cy - 1] = pl + cl;
+            vi_ldel(vi_cy);
+            vi_cy--;
+            vi_cx = pl;
+            vi_dirty = 1;
+        }
+    } else if (k == VK_DEL) {
+        if (vi_cx < vi_ll[vi_cy]) {
+            char * line = vi_ld[vi_cy];
+            memmove(line + vi_cx, line + vi_cx + 1,
+                    vi_ll[vi_cy] - vi_cx);
+            vi_ll[vi_cy]--;
+            vi_dirty = 1;
+        }
+    } else if (k == 10 || k == 13) {
+        char * line = vi_ld[vi_cy];
+        int rest = vi_ll[vi_cy] - vi_cx;
+        vi_ladd(vi_cy + 1, line + vi_cx, rest);
+        vi_ld[vi_cy][vi_cx] = 0;
+        vi_ll[vi_cy] = vi_cx;
+        vi_cy++;
+        vi_cx = 0;
+        vi_dirty = 1;
+    } else if (k == 9 || (k >= 32 && k < 127)) {
+        vi_lensure(vi_cy, vi_ll[vi_cy] + 1);
+        char * line = vi_ld[vi_cy];
+        memmove(line + vi_cx + 1, line + vi_cx,
+                vi_ll[vi_cy] - vi_cx + 1);
+        line[vi_cx] = k;
+        vi_cx++;
+        vi_ll[vi_cy]++;
+        vi_dirty = 1;
+    }
+}
+
+// --- vi ex mode ---
+
+static void vi_ex_exec(void) {
+    vi_ex_buf[vi_ex_len] = 0;
+    if (vi_ex_pr == '/') {
+        if (vi_ex_len > 0) { strcpy(vi_srch, vi_ex_buf); }
+        vi_mode = VI_NORMAL;
+        vi_search();
+        return;
+    }
+    char * cmd = vi_ex_buf;
+    while (*cmd == ' ') cmd++;
+    if (strcmp(cmd, "q") == 0) {
+        if (vi_dirty) {
+            strcpy(vi_msg, "Unsaved changes (use :q!)");
+        } else {
+            vi_run = 0;
+        }
+    } else if (strcmp(cmd, "q!") == 0) {
+        vi_run = 0;
+    } else if (strcmp(cmd, "w") == 0) {
+        vi_save();
+    } else if (strcmp(cmd, "wq") == 0 || strcmp(cmd, "x") == 0) {
+        if (vi_save() == 0) vi_run = 0;
+    } else if (cmd[0] == 'w' && cmd[1] == ' ') {
+        char * fn = cmd + 2;
+        while (*fn == ' ') fn++;
+        if (*fn) {
+            strcpy(vi_file, fn);
+            vi_save();
+        }
+    } else {
+        strcpy(vi_msg, "Unknown command");
+    }
+    vi_mode = VI_NORMAL;
+}
+
+static void vi_ex_key(int k) {
+    if (k == 27 || k == 3) {
+        vi_mode = VI_NORMAL;
+    } else if (k == 10 || k == 13) {
+        vi_ex_exec();
+    } else if (k == 127 || k == 8) {
+        if (vi_ex_len > 0) {
+            vi_ex_len--;
+            vi_ex_buf[vi_ex_len] = 0;
+        } else {
+            vi_mode = VI_NORMAL;
+        }
+    } else if (k >= 32 && k < 127 && vi_ex_len < 254) {
+        vi_ex_buf[vi_ex_len] = k;
+        vi_ex_len++;
+        vi_ex_buf[vi_ex_len] = 0;
+    }
+}
+
+// --- vi entry point ---
+
+static int cmd_vi(int argc, char ** argv) {
+    vi_nl = 0;
+    vi_cx = 0; vi_cy = 0; vi_top = 0; vi_left = 0;
+    vi_mode = VI_NORMAL; vi_dirty = 0; vi_run = 1;
+    vi_pend = 0; vi_pb = -1;
+    vi_file[0] = 0; vi_msg[0] = 0; vi_srch[0] = 0;
+    vi_sn = 0;
+    if (argc > 1) { vi_load(argv[1]); }
+    else { vi_ladd(0, "", 0); }
+    vi_getsize();
+    termraw(0, 1);
+    vi_sn = 0;
+    vi_sesc("[?1049h");
+    vi_sflush();
+    while (vi_run) {
+        vi_render();
+        int k = vi_readkey();
+        if (k == -1) { vi_getsize(); continue; }
+        if (vi_mode == VI_NORMAL) { vi_normal(k); }
+        else if (vi_mode == VI_INSERT) { vi_insert(k); }
+        else if (vi_mode == VI_EX) { vi_ex_key(k); }
+    }
+    vi_sn = 0;
+    vi_sesc("[?1049l");
+    vi_sflush();
+    termraw(0, 0);
+    vi_lfree();
+    return 0;
+}
+
 static int cmd_help(int argc, char ** argv) {
     int i = 0;
     while (i < ncmds) {
@@ -3068,6 +3726,7 @@ static void setup(void) {
     cmd_reg("sleep", cmd_sleep, "sleep SECONDS");
     cmd_reg("kill", cmd_kill, "kill [-SIG] PID");
     cmd_reg("sh", cmd_sh, "sh [-c COMMAND] [SCRIPT]");
+    cmd_reg("vi", cmd_vi, "vi [FILE]");
     cmd_reg("help", cmd_help, "help");
     cmd_reg("exit", cmd_exit, "exit [CODE]");
 }
