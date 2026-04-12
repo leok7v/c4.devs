@@ -896,6 +896,15 @@ Thompson NFA construction. Support: . * + ? [] ^ $ |
 and capture groups \( \). Not a priority until basic
 grep -F and sed s/// are battle-tested.
 
+Reference implementation: `local/tiny-regex-c/` (kokke,
+public domain, ~500 SLOC). Zero malloc, all static arrays,
+iterative matching (no recursion). Supports . ^ $ * + ?
+[a-z] [^abc] \s\S \w\W \d\D. Known gaps: | (alternation)
+broken, no capture groups. The struct uses a union (ch vs
+ccl pointer) which cx handles. Good starting point — adapt
+and trim to ~200-300 lines for cx, fix inverted classes,
+possibly add alternation.
+
 **Full sed:**
 
 POSIX sed beyond s///: address ranges (line numbers,
@@ -975,7 +984,7 @@ between platforms and cx code should not care.
     [x] Stage 7 — interactive shell: readline with history/arrows,
         isatty/termraw/winsize intrinsics, help/exit builtins,
         toys invoked bare enters sh mode (warm VM)
-    [ ] Stage 7 — vi: minimal screen editor (insert/normal/ex modes,
+    [x] Stage 7 — vi: minimal screen editor (insert/normal/ex modes,
         arrows, dd, x, A, I, o/O, /search, :w :wq :q!)
     [ ] Stage 8 — cx as embedded interpreter:
         (a) toys assumes a cx binary lives next to argv[0] and
