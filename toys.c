@@ -2022,19 +2022,92 @@ static int cmd_chmod(int argc, char ** argv) {
         rc = 1;
     }
     if (!rc) {
+        char * ms = argv[1];
+        int symbolic = 0;
         int mode = 0;
-        char * s = argv[1];
-        while (*s >= '0' && *s <= '7') {
-            mode = mode * 8 + (*s - '0');
-            s++;
+        // detect symbolic mode: [ugoa][+-=][rwx...]
+        if ((*ms >= 'a' && *ms <= 'z') || *ms == '+' || *ms == '-') {
+            symbolic = 1;
+        }
+        if (!symbolic) {
+            char * s = ms;
+            while (*s >= '0' && *s <= '7') {
+                mode = mode * 8 + (*s - '0');
+                s++;
+            }
         }
         int j = 2;
         while (j < argc && !rc) {
-            if (chmod(argv[j], mode) != 0) {
-                cx_err("chmod: failed: ");
-                cx_err(argv[j]);
-                cx_err("\n");
-                rc = 1;
+            if (symbolic) {
+                struct cx_stat st;
+                if (stat(argv[j], (void*)&st) != 0) {
+                    cx_err("chmod: cannot stat: ");
+                    cx_err(argv[j]);
+                    cx_err("\n");
+                    rc = 1;
+                } else {
+                    mode = st.mode & 4095; // keep low 12 bits
+                    char * p = ms;
+                    while (*p) {
+                        // parse who: u g o a (default = a)
+                        int umask = 0;
+                        int gmask = 0;
+                        int omask = 0;
+                        int who = 0;
+                        while (*p == 'u' || *p == 'g' || *p == 'o' ||
+                               *p == 'a') {
+                            if (*p == 'u') { umask = 1; who = 1; }
+                            if (*p == 'g') { gmask = 1; who = 1; }
+                            if (*p == 'o') { omask = 1; who = 1; }
+                            if (*p == 'a') {
+                                umask = 1; gmask = 1; omask = 1; who = 1;
+                            }
+                            p++;
+                        }
+                        if (!who) { umask = 1; gmask = 1; omask = 1; }
+                        // parse op: + - =
+                        int op = 0;
+                        if (*p == '+' || *p == '-' || *p == '=') {
+                            op = *p; p++;
+                        }
+                        // parse perms: r w x
+                        int bits = 0;
+                        while (*p == 'r' || *p == 'w' || *p == 'x') {
+                            if (*p == 'r') { bits = bits | 4; }
+                            if (*p == 'w') { bits = bits | 2; }
+                            if (*p == 'x') { bits = bits | 1; }
+                            p++;
+                        }
+                        // apply
+                        int mask = 0;
+                        if (umask) { mask = mask | (bits << 6); }
+                        if (gmask) { mask = mask | (bits << 3); }
+                        if (omask) { mask = mask | bits; }
+                        if (op == '+') { mode = mode | mask; }
+                        if (op == '-') { mode = mode & ~mask; }
+                        if (op == '=') {
+                            int clear = 0;
+                            if (umask) { clear = clear | (7 << 6); }
+                            if (gmask) { clear = clear | (7 << 3); }
+                            if (omask) { clear = clear | 7; }
+                            mode = (mode & ~clear) | mask;
+                        }
+                        if (*p == ',') { p++; }
+                    }
+                    if (chmod(argv[j], mode) != 0) {
+                        cx_err("chmod: failed: ");
+                        cx_err(argv[j]);
+                        cx_err("\n");
+                        rc = 1;
+                    }
+                }
+            } else {
+                if (chmod(argv[j], mode) != 0) {
+                    cx_err("chmod: failed: ");
+                    cx_err(argv[j]);
+                    cx_err("\n");
+                    rc = 1;
+                }
             }
             j++;
         }
@@ -2203,9 +2276,57 @@ static int cmd_ls(int argc, char ** argv) {
         }
         i++;
     }
-    char * dir = ".";
-    if (i < argc) {
-        dir = argv[i];
+    // collect dir/file arguments
+    int first_arg = i;
+    if (i >= argc) { first_arg = 0; } // will use "." default
+    // handle each argument — could be a file or directory
+    int ai = first_arg;
+    int arg_count = (first_arg == 0) ? 1 : argc - first_arg;
+    int argi = 0;
+    while (argi < arg_count && !rc) {
+    char * dir;
+    if (first_arg == 0) {
+        dir = ".";
+    } else {
+        dir = argv[ai + argi];
+    }
+    // check if it's a file (not a directory)
+    struct cx_stat fst;
+    int is_file = 0;
+    if (stat(dir, (void*)&fst) == 0) {
+        if ((fst.mode & 0040000) == 0) { is_file = 1; }
+    }
+    if (is_file) {
+        if (long_fmt) {
+            char perms[12];
+            ls_perms(fst.mode, perms);
+            cx_puts(perms);
+            cx_out("  ", 2);
+            char nb[16];
+            cx_itopad(fst.nlink, nb, 2);
+            cx_puts(nb);
+            cx_out(" ", 1);
+            if (human) {
+                char hb[16];
+                ls_human_size(fst.size, hb);
+                int hl = strlen(hb);
+                int pad = 5 - hl;
+                while (pad > 0) { cx_out(" ", 1); pad--; }
+                cx_puts(hb);
+            } else {
+                cx_itopad(fst.size, nb, 8);
+                cx_puts(nb);
+            }
+            cx_out(" ", 1);
+        }
+        cx_puts(dir);
+        cx_out("\n", 1);
+        argi++;
+        continue;
+    }
+    if (arg_count > 1) {
+        cx_puts(dir);
+        cx_out(":\n", 2);
     }
     void * dp = opendir(dir);
     if (dp == 0) {
@@ -2291,6 +2412,8 @@ static int cmd_ls(int argc, char ** argv) {
         }
         free(names);
     }
+    argi++;
+    } // end while argi
     return rc;
 }
 
@@ -4481,7 +4604,7 @@ static void setup(void) {
     cmd_reg("cp", cmd_cp, "cp [-r] SRC DST");
     cmd_reg("mv", cmd_mv, "mv SRC DST");
     cmd_reg("ln", cmd_ln, "ln [-s] TARGET LINK");
-    cmd_reg("chmod", cmd_chmod, "chmod MODE FILE...");
+    cmd_reg("chmod", cmd_chmod, "chmod [ugoa][+-=][rwx] | OCTAL FILE...");
     cmd_reg("cd", cmd_cd, "cd [DIR]");
     cmd_reg("env", cmd_env, "env [NAME=VALUE...]");
     cmd_reg("install", cmd_install, "install DIR");
