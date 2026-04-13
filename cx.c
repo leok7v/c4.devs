@@ -442,6 +442,62 @@ void fatal(char *s) {
     exit(-1);
 }
 
+// find function name for a code address (byte offset from code_base)
+char * fn_name_at(int64_t addr, int64_t *fn_offset) {
+    int64_t *s; int64_t best; char *name;
+    best = -1; name = 0;
+    s = sym_pool;
+    while (s[Tk]) {
+        if (s[Class] == Fun && s[Val]) {
+            int64_t entry;
+            entry = (int64_t)((char *)s[Val] - (char *)code_base);
+            if (entry <= addr && entry > best) {
+                best = entry;
+                name = (char *)s[Name];
+                *fn_offset = addr - entry;
+            }
+        }
+        s = s + Idsz;
+    }
+    return name;
+}
+
+// print stack trace from current bp
+void stacktrace(int64_t *bp_cur, int64_t *stack_top) {
+    int depth; int64_t ret; int64_t off; char *name; char nb[20]; int ni;
+    depth = 0;
+    printf("stack trace:\n");
+    while (depth < 16) {
+        if ((int64_t *)bp_cur[0] <= bp_cur || bp_cur[0] == 0) break;
+        if ((int64_t *)bp_cur[0] >= stack_top) break;
+        ret = bp_cur[1];
+        if (ret == -1) break;
+        off = 0;
+        name = fn_name_at(ret, &off);
+        if (name) {
+            // print name (not null-terminated in source, but ends at non-alnum)
+            printf("  ");
+            while ((*name >= 'a' && *name <= 'z') ||
+                   (*name >= 'A' && *name <= 'Z') ||
+                   (*name >= '0' && *name <= '9') || *name == '_') {
+                printf("%c", *name);
+                name++;
+            }
+            printf("+%d\n", (int)off);
+        } else {
+            ni = 0;
+            ret = ret < 0 ? -ret : ret;
+            if (ret == 0) { nb[ni++] = '0'; }
+            while (ret > 0) { nb[ni++] = '0' + (int)(ret % 10); ret = ret / 10; }
+            printf("  <0x");
+            while (ni > 0) { ni--; printf("%c", nb[ni]); }
+            printf(">\n");
+        }
+        bp_cur = (int64_t *)bp_cur[0];
+        depth++;
+    }
+}
+
 void intrinsic(char *name, int64_t opcode) {
     p = name;
     next();
@@ -3676,6 +3732,7 @@ int run(int64_t *pc_offset, int argc, char **argv) {
             case I_ASRT:
                 if (!*sp) {
                     printf("assert failed at cycle %d\n", (int)cycle);
+                    stacktrace(bp, t);
                     return -1;
                 }
                 break;

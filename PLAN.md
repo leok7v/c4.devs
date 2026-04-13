@@ -1014,6 +1014,21 @@ between platforms and cx code should not care.
 
 ---
 
+## To discuss
+
+- **assert()** — runtime assertion macro for cx.c and toys.c.
+  What form? `assert(cond)` with message to stderr + abort?
+  Should it be a cx intrinsic, a preprocessor macro, or both?
+  How does it interact with self-hosting (cx doesn't have macros
+  with stringification)?
+
+- **Trivial stack trace** — on fatal error (assert failure, segfault
+  in VM), print the cx call stack (function names + PC offsets).
+  The symbol table is already in memory at runtime — just walk it.
+  How deep? Just the cx-level stack, or also the native frames?
+
+---
+
 ## Progress log
 
 See `MEMORY.md` — timestamped entries for each checkpoint landed against
