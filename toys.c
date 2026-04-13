@@ -563,20 +563,41 @@ static void wc_fd(int fd, int * wl, int * ww, int * wb) {
     *wb = *wb + nb;
 }
 
+static void wc_print(int wl, int ww, int wb, int fl, int fw, int fb,
+                     char *name) {
+    int need_sp;
+    need_sp = 0;
+    if (fl) { if (need_sp) { rt_out(" ", 1); } cx_putint(1, wl); need_sp = 1; }
+    if (fw) { if (need_sp) { rt_out(" ", 1); } cx_putint(1, ww); need_sp = 1; }
+    if (fb) { if (need_sp) { rt_out(" ", 1); } cx_putint(1, wb); need_sp = 1; }
+    if (name) { rt_out(" ", 1); rt_puts(name); }
+    rt_out("\n", 1);
+}
+
 static int cmd_wc(int argc, char ** argv) {
     int rc = 0;
     int i = 1;
     int wl = 0;
     int ww = 0;
     int wb = 0;
+    int fl = 0;
+    int fw = 0;
+    int fb = 0;
+    int j;
+    while (i < argc && argv[i][0] == '-' && argv[i][1]) {
+        j = 1;
+        while (argv[i][j]) {
+            if (argv[i][j] == 'l') { fl = 1; }
+            if (argv[i][j] == 'w') { fw = 1; }
+            if (argv[i][j] == 'c' || argv[i][j] == 'm') { fb = 1; }
+            j++;
+        }
+        i++;
+    }
+    if (!fl && !fw && !fb) { fl = 1; fw = 1; fb = 1; }
     if (i >= argc) {
         wc_fd(0, &wl, &ww, &wb);
-        cx_putint(1, wl);
-        rt_out(" ", 1);
-        cx_putint(1, ww);
-        rt_out(" ", 1);
-        cx_putint(1, wb);
-        rt_out("\n", 1);
+        wc_print(wl, ww, wb, fl, fw, fb, 0);
     } else {
         while (i < argc && !rc) {
             wl = 0;
@@ -588,14 +609,7 @@ static int cmd_wc(int argc, char ** argv) {
             } else {
                 wc_fd(fd, &wl, &ww, &wb);
                 close(fd);
-                cx_putint(1, wl);
-                rt_out(" ", 1);
-                cx_putint(1, ww);
-                rt_out(" ", 1);
-                cx_putint(1, wb);
-                rt_out(" ", 1);
-                rt_puts(argv[i]);
-                rt_out("\n", 1);
+                wc_print(wl, ww, wb, fl, fw, fb, argv[i]);
             }
             i++;
         }
@@ -2422,6 +2436,26 @@ static int cmd_ls(int argc, char ** argv) {
     return rc;
 }
 
+// simple glob match: supports * and ? wildcards
+static int glob_match(char * pat, char * str) {
+    while (*pat && *str) {
+        if (*pat == '*') {
+            pat++;
+            if (!*pat) return 1;
+            while (*str) {
+                if (glob_match(pat, str)) return 1;
+                str++;
+            }
+            return 0;
+        }
+        if (*pat == '?') { pat++; str++; }
+        else if (*pat == *str) { pat++; str++; }
+        else { return 0; }
+    }
+    while (*pat == '*') { pat++; }
+    return (!*pat && !*str);
+}
+
 static int find_walk(char * path, char * name_pat, char tf) {
     int rc = 0;
     struct cx_stat st;
@@ -2439,7 +2473,7 @@ static int find_walk(char * path, char * name_pat, char tf) {
                 }
                 p++;
             }
-            if (strcmp(base, name_pat) != 0) {
+            if (!glob_match(name_pat, base)) {
                 show = 0;
             }
         }
