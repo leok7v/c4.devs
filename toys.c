@@ -266,6 +266,7 @@ struct cmd {
 
 struct cmd cmds[64];
 int ncmds = 0;
+char cx_path[4096];
 
 static int cmd_true(int argc, char ** argv) {
     return 0;
@@ -3610,6 +3611,68 @@ static int cmd_vi(int argc, char ** argv) {
     return 0;
 }
 
+static void cx_find(char * argv0) {
+    char buf[4096];
+    cx_path[0] = 0;
+    // try directory of argv[0] (works for native builds: build/toys -> build/cx)
+    int len = strlen(argv0);
+    char * sl = strrchr(argv0, '/');
+    if (sl) {
+        int dlen = sl - argv0;
+        memcpy(buf, argv0, dlen);
+        strcpy(buf + dlen, "/cx");
+        if (access(buf, 1) == 0) { strcpy(cx_path, buf); return; }
+    }
+    // try build/cx relative to cwd
+    if (access("build/cx", 1) == 0) {
+        char cwd[4096];
+        if (getcwd(cwd, 4096)) {
+            strcpy(cx_path, cwd);
+            strcat(cx_path, "/build/cx");
+            return;
+        }
+    }
+    // try cx in PATH via which-like search
+    char * path = getenv("PATH");
+    if (path) {
+        int pi = 0;
+        while (path[pi]) {
+            int start = pi;
+            while (path[pi] && path[pi] != ':') { pi++; }
+            int plen = pi - start;
+            if (plen > 0 && plen < 4080) {
+                memcpy(buf, path + start, plen);
+                strcpy(buf + plen, "/cx");
+                if (access(buf, 1) == 0) { strcpy(cx_path, buf); return; }
+            }
+            if (path[pi] == ':') { pi++; }
+        }
+    }
+}
+
+static int cmd_cx(int argc, char ** argv) {
+    if (argc < 2) {
+        cx_err("usage: cx FILE.c [ARGS...]\n");
+        return 1;
+    }
+    if (cx_path[0] == 0) {
+        cx_err("cx: cannot find cx binary\n");
+        return 1;
+    }
+    struct sb cmd;
+    memset(&cmd, 0, sizeof(struct sb));
+    sb_puts(&cmd, cx_path);
+    int i = 1;
+    while (i < argc) {
+        sb_putc(&cmd, ' ');
+        sb_puts(&cmd, argv[i]);
+        i++;
+    }
+    int rc = system(cmd.data ? cmd.data : "");
+    sb_free(&cmd);
+    return rc / 256;
+}
+
 static int cmd_help(int argc, char ** argv) {
     int i = 0;
     while (i < ncmds) {
@@ -3649,13 +3712,28 @@ static int cmd_sh(int argc, char ** argv) {
     int interactive = (fd == 0 && isatty(0));
     char line[4096];
     if (interactive) {
-        int n = sh_readline(line, 4096, "$ ");
-        while (n >= 0) {
+        char prompt[256];
+        char cwd[4096];
+        int n;
+        while (1) {
+            if (getcwd(cwd, 4096)) {
+                char * base = strrchr(cwd, '/');
+                base = base ? base + 1 : cwd;
+                int blen = strlen(base);
+                if (blen > 250) { blen = 250; }
+                memcpy(prompt, base, blen);
+                prompt[blen] = '$';
+                prompt[blen + 1] = ' ';
+                prompt[blen + 2] = 0;
+            } else {
+                strcpy(prompt, "$ ");
+            }
+            n = sh_readline(line, 4096, prompt);
+            if (n < 0) { break; }
             if (n > 0) {
                 sh_tokenize(line);
                 sh_run_tokens(0, sh_tok_count);
             }
-            n = sh_readline(line, 4096, "$ ");
         }
     } else {
         int n = cx_getline(fd, line, 4096);
@@ -3727,6 +3805,7 @@ static void setup(void) {
     cmd_reg("kill", cmd_kill, "kill [-SIG] PID");
     cmd_reg("sh", cmd_sh, "sh [-c COMMAND] [SCRIPT]");
     cmd_reg("vi", cmd_vi, "vi [FILE]");
+    cmd_reg("cx", cmd_cx, "cx FILE.c [ARGS...]");
     cmd_reg("help", cmd_help, "help");
     cmd_reg("exit", cmd_exit, "exit [CODE]");
 }
@@ -3763,6 +3842,7 @@ static int dispatch(char * name, int argc, char ** argv) {
 
 int main(int argc, char ** argv) {
     setup();
+    cx_find(argv[0]);
     if (argc < 2) {
         return cmd_sh(1, argv);
     }

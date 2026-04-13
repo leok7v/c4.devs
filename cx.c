@@ -2664,6 +2664,13 @@ int64_t *compile(char *filename) {
     }
     raw_src[i] = 0;
     close(fd);
+    // skip shebang line (e.g. #!/usr/bin/env cx)
+    char *src_start = raw_src;
+    if (i >= 2 && raw_src[0] == '#' && raw_src[1] == '!') {
+        while (*src_start && *src_start != '\n') src_start++;
+        if (*src_start == '\n') src_start++;
+        i -= (int)(src_start - raw_src);
+    }
     // preprocess
     pp_count = 0;
     pp_cond_sp = 0;
@@ -2695,7 +2702,7 @@ int64_t *compile(char *filename) {
         }
         di++;
     }
-    char *pp_end = preprocess(raw_src, i, src_pool, filename, 0);
+    char *pp_end = preprocess(src_start, i, src_pool, filename, 0);
     if (!pp_end) {
         printf("preprocessing failed\n");
         return 0;

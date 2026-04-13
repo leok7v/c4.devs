@@ -986,10 +986,10 @@ between platforms and cx code should not care.
         toys invoked bare enters sh mode (warm VM)
     [x] Stage 7 — vi: minimal screen editor (insert/normal/ex modes,
         arrows, dd, x, A, I, o/O, /search, :w :wq :q!)
-    [ ] Stage 8 — cx as embedded interpreter:
-        (a) toys assumes a cx binary lives next to argv[0] and
-            offers "cx" as a builtin that runs any file.c with main()
-        (b) chmod +x file.c makes .c files directly executable
+    [x] Stage 8 — cx as embedded interpreter:
+        (a) cx builtin finds cx binary (adjacent to argv[0], build/,
+            or PATH) and runs any file.c with main()
+        (b) cx.c skips #! shebang lines — chmod +x file.c works
             (shebang: #!/usr/bin/env cx)
         (c) shell prompt shows basename of cwd (e.g. "c4.devs$ ")
 
