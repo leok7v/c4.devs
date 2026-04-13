@@ -2791,6 +2791,58 @@ static void sh_expand_word(char * src, char * dst, int max) {
     dst[o] = 0;
 }
 
+static void sh_expand_prompt(char * dst, int max) {
+    char * ps1 = sh_get_var("PS1");
+    if (!ps1) { ps1 = "\\w$ "; }
+    char cwd[4096];
+    if (!getcwd(cwd, 4096)) { cwd[0] = 0; }
+    char * base = strrchr(cwd, '/');
+    base = base ? base + 1 : cwd;
+    // first pass: expand \w \W \u \h \$ backslash escapes
+    char tmp[512];
+    int i = 0;
+    int o = 0;
+    while (ps1[i] && o < 510) {
+        if (ps1[i] == '\\' && ps1[i + 1]) {
+            char c = ps1[i + 1];
+            i = i + 2;
+            if (c == 'w') {
+                int k = 0;
+                while (base[k] && o < 510) { tmp[o] = base[k]; o++; k++; }
+            } else if (c == 'W') {
+                int k = 0;
+                while (cwd[k] && o < 510) { tmp[o] = cwd[k]; o++; k++; }
+            } else if (c == 'u') {
+                char * u = getenv("USER");
+                if (!u) { u = "?"; }
+                int k = 0;
+                while (u[k] && o < 510) { tmp[o] = u[k]; o++; k++; }
+            } else if (c == 'h') {
+                char * hn = getenv("HOSTNAME");
+                if (!hn) { hn = getenv("HOST"); }
+                if (!hn) { hn = getenv("NAME"); }
+                if (!hn) { hn = "?"; }
+                int k = 0;
+                while (hn[k] && hn[k] != '.' && o < 510) {
+                    tmp[o] = hn[k]; o++; k++;
+                }
+            } else if (c == '$') {
+                tmp[o] = '$'; o++;
+            } else if (c == 'n') {
+                tmp[o] = 10; o++;
+            } else {
+                tmp[o] = '\\'; o++;
+                if (o < 510) { tmp[o] = c; o++; }
+            }
+        } else {
+            tmp[o] = ps1[i]; o++; i++;
+        }
+    }
+    tmp[o] = 0;
+    // second pass: expand $VAR references
+    sh_expand_word(tmp, dst, max);
+}
+
 static void sh_run_tokens(int start, int end);
 
 static int cmd_sh_set(int argc, char ** argv) {
@@ -4231,22 +4283,10 @@ static int cmd_sh(int argc, char ** argv) {
     int interactive = (fd == 0 && isatty(0));
     char line[4096];
     if (interactive) {
-        char prompt[256];
-        char cwd[4096];
+        char prompt[512];
         int n;
         while (1) {
-            if (getcwd(cwd, 4096)) {
-                char * base = strrchr(cwd, '/');
-                base = base ? base + 1 : cwd;
-                int blen = strlen(base);
-                if (blen > 250) { blen = 250; }
-                memcpy(prompt, base, blen);
-                prompt[blen] = '$';
-                prompt[blen + 1] = ' ';
-                prompt[blen + 2] = 0;
-            } else {
-                strcpy(prompt, "$ ");
-            }
+            sh_expand_prompt(prompt, 512);
             n = sh_readline(line, 4096, prompt);
             if (n < 0) { break; }
             if (n > 0) {
@@ -4323,7 +4363,7 @@ static void setup(void) {
     cmd_reg("sleep", cmd_sleep, "sleep SECONDS");
     cmd_reg("kill", cmd_kill, "kill [-SIG] PID");
     cmd_reg("ps", cmd_ps, "ps");
-    cmd_reg("sh", cmd_sh, "sh [-c COMMAND] [SCRIPT]");
+    cmd_reg("sh", cmd_sh, "sh [-c CMD] [SCRIPT] PS1='\\w\\$ ' \\w \\W \\u \\h");
     cmd_reg("vi", cmd_vi, "vi [FILE]");
     cmd_reg("cx", cmd_cx, "cx FILE.c [ARGS...]");
     cmd_reg("help", cmd_help, "help");

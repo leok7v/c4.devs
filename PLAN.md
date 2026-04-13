@@ -996,10 +996,20 @@ between platforms and cx code should not care.
             or PATH) and runs any file.c with main()
         (b) cx.c skips #! shebang lines — chmod +x file.c works
             (shebang: #!/usr/bin/env cx)
-        (c) shell prompt shows basename of cwd (e.g. "c4.devs$ ")
+        (c) shell prompt shows basename of cwd (e.g. "c4.devs$ "),
+            now driven by PS1 variable (see Stage 10)
     [x] Stage 9 — LLM agent discoverability:
         ls -lah with permissions + human sizes, --help for all commands
         shows available flags so agents can introspect the tool suite
+    [x] Stage 10 — PS1 customizable prompt:
+        sh_expand_prompt() expands \w (basename cwd), \W (full cwd),
+        \u ($USER), \h ($HOSTNAME short), \$ (literal $), \n (newline),
+        plus $VAR expansion. Default PS1='\w$ ' (matches prior behavior).
+    [ ] Stage 10 — shell UX polish (candidates):
+        (a) ~ expansion: expand ~ to $HOME at start of words
+        (b) type/which builtin: "type echo" → "echo is a shell builtin"
+        (c) tab completion for registered command names
+        (d) $((expr)) arithmetic expansion (basic +,-,*,/,%)
 
 ---
 
