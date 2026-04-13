@@ -1447,17 +1447,18 @@ static int cmd_sed(int argc, char ** argv) {
         return 1;
     }
     // read all lines to detect last line for '$' address
-    char lines[262144]; // 64 lines x 4096
-    int lens[4096];
+    int sed_cap = 4096;
+    int sed_lw = 4096; // line width
+    char * lines = (char*)malloc(sed_cap * sed_lw);
+    int * lens = (int*)malloc(sed_cap * sizeof(int));
     int total = 0;
     char buf[4096];
     int n = cx_getline(0, buf, 4096);
-    while (n > 0 && total < 4096) {
+    while (n > 0 && total < sed_cap) {
         int blen = n;
         if (blen > 0 && buf[blen - 1] == '\n') { blen--; }
-        if (total * 4096 + blen < 262144) {
-            memcpy(lines + total * 4096, buf, blen);
-        }
+        if (blen >= sed_lw) { blen = sed_lw - 1; }
+        memcpy(lines + total * sed_lw, buf, blen);
         lens[total] = blen;
         total++;
         n = cx_getline(0, buf, 4096);
@@ -1465,7 +1466,7 @@ static int cmd_sed(int argc, char ** argv) {
     // process each line
     int li = 0;
     while (li < total) {
-        char * line = lines + li * 4096;
+        char * line = lines + li * sed_lw;
         int llen = lens[li];
         char saved = line[llen];
         line[llen] = 0; // null-terminate for regex
@@ -1509,6 +1510,8 @@ static int cmd_sed(int argc, char ** argv) {
         if (quit) { break; }
         li++;
     }
+    free(lines);
+    free(lens);
     return 0;
 }
 
