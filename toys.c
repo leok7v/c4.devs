@@ -1249,104 +1249,269 @@ static int cmd_grep(int argc, char ** argv) {
     return rc;
 }
 
+// sed command storage (parallel arrays, up to 16 commands)
+#define SED_MAX 16
+enum { SA_NONE, SA_LINE, SA_LAST, SA_RE };
+int sed_a1t[SED_MAX]; // addr1 type
+int sed_a1n[SED_MAX]; // addr1 line number
+int sed_a2t[SED_MAX]; // addr2 type
+int sed_a2n[SED_MAX]; // addr2 line number
+int sed_cmd[SED_MAX]; // command char: 's' 'd' 'p' 'q'
+int sed_sg[SED_MAX];  // s global flag
+int sed_in_range[SED_MAX]; // range tracking
+char sed_spat[4096];  // s patterns (16 x 256)
+char sed_srep[4096];  // s replacements (16 x 256)
+char sed_apat[8192];  // address regex patterns (16 x 256 x 2: a1 + a2)
+int sed_nc;           // command count
+
+static int sed_parse_addr(char * expr, int * pos, int ci, int which) {
+    int * at = (which == 1) ? sed_a1t : sed_a2t;
+    int * an = (which == 1) ? sed_a1n : sed_a2n;
+    int p = *pos;
+    if (expr[p] >= '1' && expr[p] <= '9') {
+        int n = 0;
+        while (expr[p] >= '0' && expr[p] <= '9') {
+            n = n * 10 + expr[p] - '0';
+            p++;
+        }
+        at[ci] = SA_LINE;
+        an[ci] = n;
+    } else if (expr[p] == '$') {
+        at[ci] = SA_LAST;
+        p++;
+    } else if (expr[p] == '/') {
+        p++;
+        int off = ci * 256 + (which - 1) * 256 * SED_MAX;
+        int qi = 0;
+        while (expr[p] && expr[p] != '/' && qi < 255) {
+            sed_apat[off + qi] = expr[p];
+            qi++;
+            p++;
+        }
+        sed_apat[off + qi] = 0;
+        if (expr[p] == '/') { p++; }
+        at[ci] = SA_RE;
+    } else {
+        at[ci] = SA_NONE;
+        *pos = p;
+        return 0;
+    }
+    *pos = p;
+    return 1;
+}
+
+static int sed_parse_one(char * expr) {
+    if (sed_nc >= SED_MAX) { return -1; }
+    int ci = sed_nc;
+    sed_a1t[ci] = SA_NONE;
+    sed_a2t[ci] = SA_NONE;
+    sed_in_range[ci] = 0;
+    int p = 0;
+    // parse optional address(es)
+    if (sed_parse_addr(expr, &p, ci, 1)) {
+        if (expr[p] == ',') {
+            p++;
+            sed_parse_addr(expr, &p, ci, 2);
+        }
+    }
+    // parse command
+    if (expr[p] == 's' && expr[p + 1] == '/') {
+        sed_cmd[ci] = 's';
+        p += 2;
+        int qi = 0;
+        char * sp = sed_spat + ci * 256;
+        while (expr[p] && expr[p] != '/' && qi < 255) {
+            sp[qi] = expr[p]; qi++; p++;
+        }
+        sp[qi] = 0;
+        if (expr[p] == '/') { p++; }
+        qi = 0;
+        char * rp = sed_srep + ci * 256;
+        while (expr[p] && expr[p] != '/' && qi < 255) {
+            rp[qi] = expr[p]; qi++; p++;
+        }
+        rp[qi] = 0;
+        sed_sg[ci] = 0;
+        if (expr[p] == '/') {
+            p++;
+            if (expr[p] == 'g') { sed_sg[ci] = 1; }
+        }
+    } else if (expr[p] == 'd') {
+        sed_cmd[ci] = 'd';
+    } else if (expr[p] == 'p') {
+        sed_cmd[ci] = 'p';
+    } else if (expr[p] == 'q') {
+        sed_cmd[ci] = 'q';
+    } else {
+        return -1;
+    }
+    sed_nc++;
+    return 0;
+}
+
+static int sed_addr_match(int ci, int which, char * line, int lno,
+                          int is_last) {
+    int t = (which == 1) ? sed_a1t[ci] : sed_a2t[ci];
+    int n = (which == 1) ? sed_a1n[ci] : sed_a2n[ci];
+    if (t == SA_NONE) { return 1; }
+    if (t == SA_LINE) { return lno == n; }
+    if (t == SA_LAST) { return is_last; }
+    if (t == SA_RE) {
+        int off = ci * 256 + (which - 1) * 256 * SED_MAX;
+        re_compile(sed_apat + off);
+        int ml = 0;
+        return re_match(line, &ml) >= 0;
+    }
+    return 0;
+}
+
+static int sed_in_addr(int ci, char * line, int lno, int is_last) {
+    if (sed_a1t[ci] == SA_NONE && sed_a2t[ci] == SA_NONE) {
+        return 1; // no address = all lines
+    }
+    if (sed_a2t[ci] == SA_NONE) {
+        return sed_addr_match(ci, 1, line, lno, is_last);
+    }
+    // range: addr1,addr2
+    if (!sed_in_range[ci]) {
+        if (sed_addr_match(ci, 1, line, lno, is_last)) {
+            sed_in_range[ci] = 1;
+            return 1;
+        }
+        return 0;
+    } else {
+        if (sed_addr_match(ci, 2, line, lno, is_last)) {
+            sed_in_range[ci] = 0;
+        }
+        return 1;
+    }
+}
+
+static void sed_do_sub(int ci, char * line, int len, char * out,
+                       int * olen) {
+    char * spat = sed_spat + ci * 256;
+    char * srep = sed_srep + ci * 256;
+    int rlen = strlen(srep);
+    re_compile(spat);
+    int oi = 0;
+    int p = 0;
+    int done_one = 0;
+    while (p < len) {
+        int can = sed_sg[ci] || !done_one;
+        if (can) {
+            int ml = 0;
+            int mi = re_match(line + p, &ml);
+            if (mi >= 0) {
+                memcpy(out + oi, line + p, mi);
+                oi = oi + mi;
+                memcpy(out + oi, srep, rlen);
+                oi = oi + rlen;
+                p = p + mi + (ml > 0 ? ml : 1);
+                done_one = 1;
+            } else {
+                out[oi] = line[p]; oi++; p++;
+            }
+        } else {
+            out[oi] = line[p]; oi++; p++;
+        }
+    }
+    *olen = oi;
+}
+
 static int cmd_sed(int argc, char ** argv) {
-    int rc = 0;
-    if (argc < 2) {
-        cx_err("sed: missing expression\n");
-        rc = 1;
-    }
-    char old_pat[256];
-    char new_pat[256];
-    int global = 0;
-    if (!rc) {
-        char * expr = argv[1];
-        if (expr[0] != 's' || expr[1] != '/') {
-            cx_err("sed: only s/old/new/[g] supported\n");
-            rc = 1;
-        }
-        if (!rc) {
-            int p = 2;
-            int o = 0;
-            while (expr[p] && expr[p] != '/' && o < 255) {
-                old_pat[o] = expr[p];
-                o++;
-                p++;
-            }
-            old_pat[o] = 0;
-            if (expr[p] != '/') {
+    int suppress = 0;
+    sed_nc = 0;
+    int i = 1;
+    while (i < argc && argv[i][0] == '-') {
+        if (strcmp(argv[i], "--") == 0) { i++; break; }
+        if (strcmp(argv[i], "-n") == 0) { suppress = 1; }
+        if (strcmp(argv[i], "-e") == 0 && i + 1 < argc) {
+            i++;
+            if (sed_parse_one(argv[i]) < 0) {
                 cx_err("sed: bad expression\n");
-                rc = 1;
-            }
-            if (!rc) {
-                p++;
-                int q = 0;
-                while (expr[p] && expr[p] != '/' && q < 255) {
-                    new_pat[q] = expr[p];
-                    q++;
-                    p++;
-                }
-                new_pat[q] = 0;
-                if (expr[p] == '/') {
-                    p++;
-                    if (expr[p] == 'g') {
-                        global = 1;
-                    }
-                }
+                return 1;
             }
         }
+        i++;
     }
-    if (!rc && strlen(old_pat) == 0) {
-        cx_err("sed: empty pattern\n");
-        rc = 1;
+    // non-flag arg is an expression if no -e was given
+    if (sed_nc == 0 && i < argc) {
+        if (sed_parse_one(argv[i]) < 0) {
+            cx_err("sed: bad expression\n");
+            return 1;
+        }
+        i++;
     }
-    if (!rc && !re_compile(old_pat)) {
-        cx_err("sed: bad pattern\n");
-        rc = 1;
+    if (sed_nc == 0) {
+        cx_err("sed: missing expression\n");
+        return 1;
     }
-    if (!rc) {
-        int new_len = strlen(new_pat);
-        char buf[4096];
+    // read all lines to detect last line for '$' address
+    char lines[262144]; // 64 lines x 4096
+    int lens[4096];
+    int total = 0;
+    char buf[4096];
+    int n = cx_getline(0, buf, 4096);
+    while (n > 0 && total < 4096) {
+        int blen = n;
+        if (blen > 0 && buf[blen - 1] == '\n') { blen--; }
+        if (total * 4096 + blen < 262144) {
+            memcpy(lines + total * 4096, buf, blen);
+        }
+        lens[total] = blen;
+        total++;
+        n = cx_getline(0, buf, 4096);
+    }
+    // process each line
+    int li = 0;
+    while (li < total) {
+        char * line = lines + li * 4096;
+        int llen = lens[li];
+        char saved = line[llen];
+        line[llen] = 0; // null-terminate for regex
+        int lno = li + 1;
+        int is_last = (li == total - 1);
+        int deleted = 0;
+        int printed = 0;
+        int quit = 0;
         char out[8192];
-        int n = cx_getline(0, buf, 4096);
-        while (n > 0) {
-            int has_nl = n > 0 && buf[n - 1] == '\n';
-            int blen = has_nl ? n - 1 : n;
-            int oi = 0;
-            int p = 0;
-            int done_one = 0;
-            while (p < blen) {
-                int can_match = global || !done_one;
-                if (can_match) {
-                    int mlen = 0;
-                    int mi = re_match(buf + p, &mlen);
-                    if (mi >= 0) {
-                        // copy chars before match
-                        memcpy(out + oi, buf + p, mi);
-                        oi = oi + mi;
-                        // copy replacement
-                        memcpy(out + oi, new_pat, new_len);
-                        oi = oi + new_len;
-                        p = p + mi + (mlen > 0 ? mlen : 1);
-                        done_one = 1;
-                    } else {
-                        out[oi] = buf[p];
-                        oi++;
-                        p++;
+        int oi = llen;
+        memcpy(out, line, llen);
+        int ci = 0;
+        while (ci < sed_nc && !deleted && !quit) {
+            if (sed_in_addr(ci, line, lno, is_last)) {
+                if (sed_cmd[ci] == 'd') {
+                    deleted = 1;
+                } else if (sed_cmd[ci] == 'p') {
+                    cx_write(1, out, oi);
+                    cx_out("\n", 1);
+                    printed = 1;
+                } else if (sed_cmd[ci] == 'q') {
+                    if (!suppress) {
+                        cx_write(1, out, oi);
+                        cx_out("\n", 1);
                     }
-                } else {
-                    out[oi] = buf[p];
-                    oi++;
-                    p++;
+                    quit = 1;
+                } else if (sed_cmd[ci] == 's') {
+                    int new_oi = 0;
+                    char tmp[8192];
+                    out[oi] = 0;
+                    sed_do_sub(ci, out, oi, tmp, &new_oi);
+                    memcpy(out, tmp, new_oi);
+                    oi = new_oi;
                 }
             }
-            cx_write(1, out, oi);
-            if (has_nl) {
-                cx_out("\n", 1);
-            }
-            n = cx_getline(0, buf, 4096);
+            ci++;
         }
+        line[llen] = saved;
+        if (!deleted && !quit && !suppress) {
+            cx_write(1, out, oi);
+            cx_out("\n", 1);
+        }
+        if (quit) { break; }
+        li++;
     }
-    return rc;
+    return 0;
 }
 
 static void uniq_emit(char * line, int len, int count, int sc) {
@@ -3038,6 +3203,79 @@ static int cmd_kill(int argc, char ** argv) {
     return 0;
 }
 
+static int cmd_ps(int argc, char ** argv) {
+    // try /proc on Linux, fall back to popen("ps") on macOS
+    struct cx_stat st;
+    int have_proc = stat("/proc/1", (void*)&st) == 0;
+    if (have_proc) {
+        cx_puts("  PID STATE COMMAND\n");
+        void * dp = opendir("/proc");
+        if (!dp) { cx_err("ps: cannot open /proc\n"); return 1; }
+        char * name = (char*)readdir(dp);
+        while (name) {
+            // only numeric directories are PIDs
+            int is_pid = name[0] >= '1' && name[0] <= '9';
+            int k = 0;
+            while (is_pid && name[k]) {
+                if (name[k] < '0' || name[k] > '9') { is_pid = 0; }
+                k++;
+            }
+            if (is_pid) {
+                char path[128];
+                strcpy(path, "/proc/");
+                strcat(path, name);
+                strcat(path, "/comm");
+                int fd = open(path, 0);
+                char comm[256];
+                comm[0] = 0;
+                if (fd >= 0) {
+                    int n = read(fd, comm, 255);
+                    if (n < 0) { n = 0; }
+                    comm[n] = 0;
+                    // strip trailing newline
+                    if (n > 0 && comm[n - 1] == 10) { comm[n - 1] = 0; }
+                    close(fd);
+                }
+                strcpy(path, "/proc/");
+                strcat(path, name);
+                strcat(path, "/stat");
+                fd = open(path, 0);
+                char state = '?';
+                if (fd >= 0) {
+                    char sbuf[512];
+                    int n = read(fd, sbuf, 511);
+                    if (n < 0) { n = 0; }
+                    sbuf[n] = 0;
+                    // stat format: PID (comm) STATE ...
+                    // find closing paren, state is next non-space
+                    char * cp = sbuf;
+                    while (*cp && *cp != ')') { cp++; }
+                    if (*cp == ')') { cp++; }
+                    while (*cp == ' ') { cp++; }
+                    if (*cp) { state = *cp; }
+                    close(fd);
+                }
+                char nb[16];
+                cx_itopad(atoi(name), nb, 5);
+                cx_puts(nb);
+                cx_out(" ", 1);
+                char sb[4];
+                sb[0] = ' '; sb[1] = ' '; sb[2] = state; sb[3] = ' ';
+                cx_write(1, sb, 4);
+                cx_out(" ", 1);
+                cx_puts(comm);
+                cx_out("\n", 1);
+            }
+            name = (char*)readdir(dp);
+        }
+        closedir(dp);
+    } else {
+        // macOS fallback: use system ps and pipe to stdout
+        system("ps -eo pid,stat,comm");
+    }
+    return 0;
+}
+
 // --- Shell history and line editing ---
 
 #define RL_HIST_MAX 64
@@ -4057,7 +4295,7 @@ static void setup(void) {
     cmd_reg("tr", cmd_tr, "tr SET1 SET2");
     cmd_reg("cut", cmd_cut, "cut -d DELIM -f FIELD [FILE...]");
     cmd_reg("grep", cmd_grep, "grep [-ivcn] REGEX [FILE...] (.^$*+?[a-z]\\d\\w\\s)");
-    cmd_reg("sed", cmd_sed, "sed s/REGEX/REPL/[g] [FILE...] (.^$*+?[a-z]\\d\\w\\s)");
+    cmd_reg("sed", cmd_sed, "sed [-n] [-e CMD] [ADDR[,ADDR]]s/RE/REPL/[g]|d|p|q");
     cmd_reg("uniq", cmd_uniq, "uniq [-c] [FILE...]");
     cmd_reg("sort", cmd_sort, "sort [-r] [FILE...]");
     cmd_reg("printf", cmd_printf, "printf FORMAT [ARGS...]");
@@ -4082,6 +4320,7 @@ static void setup(void) {
     cmd_reg("date", cmd_date, "date");
     cmd_reg("sleep", cmd_sleep, "sleep SECONDS");
     cmd_reg("kill", cmd_kill, "kill [-SIG] PID");
+    cmd_reg("ps", cmd_ps, "ps");
     cmd_reg("sh", cmd_sh, "sh [-c COMMAND] [SCRIPT]");
     cmd_reg("vi", cmd_vi, "vi [FILE]");
     cmd_reg("cx", cmd_cx, "cx FILE.c [ARGS...]");

@@ -983,7 +983,9 @@ between platforms and cx code should not care.
     [x] Stage 6 — regex engine (~180 lines, adapted from tiny-regex-c):
         . ^ $ * + ? [abc] [^abc] [a-z] \s\S \w\W \d\D — wired into
         grep and sed (both now do real pattern matching, not just strstr)
-    [ ] Stage 6 — stretch goals: ps, full sed
+    [x] Stage 6 — ps (/proc on Linux, system ps fallback on macOS)
+    [x] Stage 6 — full sed: addresses (line, $, /regex/), ranges,
+        commands (s///[g], d, p, q), -n suppress, -e multi-expression
     [x] Stage 7 — interactive shell: readline with history/arrows,
         isatty/termraw/winsize intrinsics, help/exit builtins,
         toys invoked bare enters sh mode (warm VM)
@@ -995,6 +997,9 @@ between platforms and cx code should not care.
         (b) cx.c skips #! shebang lines — chmod +x file.c works
             (shebang: #!/usr/bin/env cx)
         (c) shell prompt shows basename of cwd (e.g. "c4.devs$ ")
+    [x] Stage 9 — LLM agent discoverability:
+        ls -lah with permissions + human sizes, --help for all commands
+        shows available flags so agents can introspect the tool suite
 
 ---
 
