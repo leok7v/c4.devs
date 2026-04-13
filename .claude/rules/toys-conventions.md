@@ -15,11 +15,11 @@ Use `write(1, ...)` for all command stdout. Format numbers manually
 (`cx_itoa`, `cx_itopad`). Reserve `printf` for test harnesses, not
 for command implementations.
 
-## Errors go to stderr via `cx_err`
+## Errors go to stderr via `rt_err`
 
-    void cx_err(char *msg) { write(2, msg, strlen(msg)); }
+    void rt_err(char *msg) { rt_write(2, msg, strlen(msg)); }
 
-Every command diagnostic uses `cx_err`. Never `printf` for errors —
+Every command diagnostic uses `rt_err`. Never `printf` for errors —
 buffering will swallow the message when the command is piped into
 another process.
 

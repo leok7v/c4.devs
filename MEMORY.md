@@ -57,7 +57,7 @@ Major deliverables in a single session:
 
 6. **ls -lah** — permissions string (`drwxr-xr-x`), nlink, human-readable sizes.
 
-7. **CI fix** — replaced raw `write()`/`read()` with `cx_write()` in vi and
+7. **CI fix** — replaced raw `write()`/`read()` with `rt_write()` in vi and
    readline code to satisfy gcc `-Wunused-result`. CI green.
 
 All 45/45 tests pass on both native and self-hosted paths.

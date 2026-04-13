@@ -56,21 +56,26 @@ static int termraw(int fd, int enable) {
 #define S_ISREG(m) (((m) & S_IFMT) == S_IFREG)
 #endif
 
-static void cx_write(int fd, const void * buf, int n) {
-    int r = (int)write(fd, buf, n);
-    (void)r;
+static void rt_write(int fd, const void * buf, int n) {
+    char * p; int r;
+    p = (char *)buf;
+    while (n > 0) {
+        r = (int)write(fd, p, n);
+        if (r <= 0) { exit(1); }
+        p = p + r; n = n - r;
+    }
 }
 
-static void cx_err(char * s) {
-    cx_write(2, s, (int)strlen(s));
+static void rt_err(char * s) {
+    rt_write(2, s, (int)strlen(s));
 }
 
-static void cx_out(char * s, int n) {
-    cx_write(1, s, n);
+static void rt_out(char * s, int n) {
+    rt_write(1, s, n);
 }
 
-static void cx_puts(char * s) {
-    cx_write(1, s, (int)strlen(s));
+static void rt_puts(char * s) {
+    rt_write(1, s, (int)strlen(s));
 }
 
 struct sb {
@@ -80,7 +85,7 @@ struct sb {
 };
 
 static void * sb_oom(void * p) {
-    if (!p) { cx_write(2, "Out of Memory\n", 14); exit(1); }
+    if (!p) { rt_write(2, "Out of Memory\n", 14); exit(1); }
     return p;
 }
 
@@ -168,7 +173,7 @@ static int cx_itopad(int n, char * buf, int w) {
 static void cx_putint(int fd, int n) {
     char buf[24];
     int len = cx_itoa(n, buf);
-    cx_write(fd, buf, len);
+    rt_write(fd, buf, len);
 }
 
 static int cx_getline(int fd, char * buf, int cap) {
@@ -196,9 +201,9 @@ static int cx_getline(int fd, char * buf, int cap) {
 static int cx_openrd(char * path) {
     int fd = open(path, 0);
     if (fd < 0) {
-        cx_err("cannot open: ");
-        cx_err(path);
-        cx_err("\n");
+        rt_err("cannot open: ");
+        rt_err(path);
+        rt_err("\n");
     }
     return fd;
 }
@@ -287,13 +292,13 @@ static int cmd_echo(int argc, char ** argv) {
     int first = i;
     while (i < argc) {
         if (i > first) {
-            cx_out(" ", 1);
+            rt_out(" ", 1);
         }
-        cx_puts(argv[i]);
+        rt_puts(argv[i]);
         i++;
     }
     if (nl) {
-        cx_out("\n", 1);
+        rt_out("\n", 1);
     }
     return rc;
 }
@@ -305,8 +310,8 @@ static int cmd_yes(int argc, char ** argv) {
         msg = argv[1];
     }
     while (1) {
-        cx_puts(msg);
-        cx_out("\n", 1);
+        rt_puts(msg);
+        rt_out("\n", 1);
     }
     return rc;
 }
@@ -314,7 +319,7 @@ static int cmd_yes(int argc, char ** argv) {
 static int cmd_basename(int argc, char ** argv) {
     int rc = 0;
     if (argc < 2) {
-        cx_err("basename: missing operand\n");
+        rt_err("basename: missing operand\n");
         rc = 1;
     }
     if (!rc) {
@@ -344,8 +349,8 @@ static int cmd_basename(int argc, char ** argv) {
                 blen -= slen;
             }
         }
-        cx_write(1, base, blen);
-        cx_out("\n", 1);
+        rt_write(1, base, blen);
+        rt_out("\n", 1);
     }
     return rc;
 }
@@ -353,7 +358,7 @@ static int cmd_basename(int argc, char ** argv) {
 static int cmd_dirname(int argc, char ** argv) {
     int rc = 0;
     if (argc < 2) {
-        cx_err("dirname: missing operand\n");
+        rt_err("dirname: missing operand\n");
         rc = 1;
     }
     if (!rc) {
@@ -371,13 +376,13 @@ static int cmd_dirname(int argc, char ** argv) {
             i++;
         }
         if (last < 0) {
-            cx_out(".", 1);
+            rt_out(".", 1);
         } else if (last == 0) {
-            cx_out("/", 1);
+            rt_out("/", 1);
         } else {
-            cx_write(1, path, last);
+            rt_write(1, path, last);
         }
-        cx_out("\n", 1);
+        rt_out("\n", 1);
     }
     return rc;
 }
@@ -388,7 +393,7 @@ static int cmd_seq(int argc, char ** argv) {
     int step = 1;
     int end = 0;
     if (argc < 2) {
-        cx_err("seq: missing argument\n");
+        rt_err("seq: missing argument\n");
         rc = 1;
     }
     if (!rc && argc == 2) {
@@ -404,7 +409,7 @@ static int cmd_seq(int argc, char ** argv) {
         end = atoi(argv[3]);
     }
     if (!rc && step == 0) {
-        cx_err("seq: step cannot be 0\n");
+        rt_err("seq: step cannot be 0\n");
         rc = 1;
     }
     if (!rc) {
@@ -412,7 +417,7 @@ static int cmd_seq(int argc, char ** argv) {
         int going = step > 0 ? i <= end : i >= end;
         while (going) {
             cx_putint(1, i);
-            cx_out("\n", 1);
+            rt_out("\n", 1);
             i += step;
             going = step > 0 ? i <= end : i >= end;
         }
@@ -424,7 +429,7 @@ static void cat_fd(int fd) {
     char buf[4096];
     int n = read(fd, buf, 4096);
     while (n > 0) {
-        cx_write(1, buf, n);
+        rt_write(1, buf, n);
         n = read(fd, buf, 4096);
     }
 }
@@ -459,7 +464,7 @@ static void head_fd(int fd, int n) {
             done = 1;
         }
         if (!done) {
-            cx_write(1, buf, len);
+            rt_write(1, buf, len);
             line++;
         }
     }
@@ -521,7 +526,7 @@ static int cmd_tail(int argc, char ** argv) {
         }
         int j = start;
         while (j < l.count) {
-            cx_write(1, l.data[j], l.lens[j]);
+            rt_write(1, l.data[j], l.lens[j]);
             j++;
         }
     }
@@ -567,11 +572,11 @@ static int cmd_wc(int argc, char ** argv) {
     if (i >= argc) {
         wc_fd(0, &wl, &ww, &wb);
         cx_putint(1, wl);
-        cx_out(" ", 1);
+        rt_out(" ", 1);
         cx_putint(1, ww);
-        cx_out(" ", 1);
+        rt_out(" ", 1);
         cx_putint(1, wb);
-        cx_out("\n", 1);
+        rt_out("\n", 1);
     } else {
         while (i < argc && !rc) {
             wl = 0;
@@ -584,13 +589,13 @@ static int cmd_wc(int argc, char ** argv) {
                 wc_fd(fd, &wl, &ww, &wb);
                 close(fd);
                 cx_putint(1, wl);
-                cx_out(" ", 1);
+                rt_out(" ", 1);
                 cx_putint(1, ww);
-                cx_out(" ", 1);
+                rt_out(" ", 1);
                 cx_putint(1, wb);
-                cx_out(" ", 1);
-                cx_puts(argv[i]);
-                cx_out("\n", 1);
+                rt_out(" ", 1);
+                rt_puts(argv[i]);
+                rt_out("\n", 1);
             }
             i++;
         }
@@ -606,9 +611,9 @@ static int cmd_tee(int argc, char ** argv) {
     while (i < argc && nfds < 16 && !rc) {
         fds[nfds] = open(argv[i], 1 | O_CREAT | O_TRUNC, 420);
         if (fds[nfds] < 0) {
-            cx_err("tee: cannot open: ");
-            cx_err(argv[i]);
-            cx_err("\n");
+            rt_err("tee: cannot open: ");
+            rt_err(argv[i]);
+            rt_err("\n");
             rc = 1;
         } else {
             nfds++;
@@ -619,10 +624,10 @@ static int cmd_tee(int argc, char ** argv) {
         char buf[4096];
         int n = read(0, buf, 4096);
         while (n > 0) {
-            cx_write(1, buf, n);
+            rt_write(1, buf, n);
             int j = 0;
             while (j < nfds) {
-                cx_write(fds[j], buf, n);
+                rt_write(fds[j], buf, n);
                 j++;
             }
             n = read(0, buf, 4096);
@@ -653,7 +658,7 @@ static int cmd_rev(int argc, char ** argv) {
             lo++;
             hi--;
         }
-        cx_write(1, buf, n);
+        rt_write(1, buf, n);
         n = cx_getline(0, buf, 4096);
     }
     return rc;
@@ -681,7 +686,7 @@ static int cmd_tac(int argc, char ** argv) {
     if (!rc) {
         int i = l.count - 1;
         while (i >= 0) {
-            cx_write(1, l.data[i], l.lens[i]);
+            rt_write(1, l.data[i], l.lens[i]);
             i--;
         }
     }
@@ -705,9 +710,9 @@ static int cmd_nl(int argc, char ** argv) {
         int n = cx_getline(fd, buf, 4096);
         while (n > 0) {
             int nlen = cx_itopad(line, num, 6);
-            cx_write(1, num, nlen);
-            cx_out("\t", 1);
-            cx_write(1, buf, n);
+            rt_write(1, num, nlen);
+            rt_out("\t", 1);
+            rt_write(1, buf, n);
             line++;
             n = cx_getline(fd, buf, 4096);
         }
@@ -731,14 +736,14 @@ static int cmd_fold(int argc, char ** argv) {
         int i = 0;
         while (i < n) {
             if (buf[i] == '\n') {
-                cx_out("\n", 1);
+                rt_out("\n", 1);
                 col = 0;
             } else {
                 if (col >= w) {
-                    cx_out("\n", 1);
+                    rt_out("\n", 1);
                     col = 0;
                 }
-                cx_write(1, buf + i, 1);
+                rt_write(1, buf + i, 1);
                 col++;
             }
             i++;
@@ -764,15 +769,15 @@ static int cmd_expand(int argc, char ** argv) {
                 int spaces = tab - col % tab;
                 int j = 0;
                 while (j < spaces) {
-                    cx_out(" ", 1);
+                    rt_out(" ", 1);
                     j++;
                 }
                 col += spaces;
             } else if (buf[i] == '\n') {
-                cx_out("\n", 1);
+                rt_out("\n", 1);
                 col = 0;
             } else {
-                cx_write(1, buf + i, 1);
+                rt_write(1, buf + i, 1);
                 col++;
             }
             i++;
@@ -813,19 +818,19 @@ static int cmd_paste(int argc, char ** argv) {
                 char buf[4096];
                 int n = cx_getline(fds[j], buf, 4096);
                 if (j > 0) {
-                    cx_write(1, &delim, 1);
+                    rt_write(1, &delim, 1);
                 }
                 if (n > 0) {
                     any = 1;
                     if (buf[n - 1] == '\n') {
                         n--;
                     }
-                    cx_write(1, buf, n);
+                    rt_write(1, buf, n);
                 }
                 j++;
             }
             if (any) {
-                cx_out("\n", 1);
+                rt_out("\n", 1);
             }
         }
     }
@@ -842,7 +847,7 @@ static int cmd_paste(int argc, char ** argv) {
 static int cmd_tr(int argc, char ** argv) {
     int rc = 0;
     if (argc < 3) {
-        cx_err("tr: usage: tr SET1 SET2\n");
+        rt_err("tr: usage: tr SET1 SET2\n");
         rc = 1;
     }
     if (!rc) {
@@ -870,7 +875,7 @@ static int cmd_tr(int argc, char ** argv) {
                 buf[p] = tab[buf[p] & 0xFF];
                 p++;
             }
-            cx_write(1, buf, n);
+            rt_write(1, buf, n);
             n = read(0, buf, 4096);
         }
     }
@@ -912,7 +917,7 @@ static int cmd_cut(int argc, char ** argv) {
         }
     }
     if (field < 1) {
-        cx_err("cut: bad field\n");
+        rt_err("cut: bad field\n");
         rc = 1;
     }
     if (!rc) {
@@ -946,8 +951,8 @@ static int cmd_cut(int argc, char ** argv) {
                 start = 0;
                 end = 0;
             }
-            cx_write(1, buf + start, end - start);
-            cx_out("\n", 1);
+            rt_write(1, buf + start, end - start);
+            rt_out("\n", 1);
             n = cx_getline(0, buf, 4096);
         }
     }
@@ -1184,7 +1189,7 @@ static int cmd_grep(int argc, char ** argv) {
         i++;
     }
     if (i >= argc) {
-        cx_err("grep: missing pattern\n");
+        rt_err("grep: missing pattern\n");
         rc = 1;
     }
     if (!rc) {
@@ -1197,7 +1202,7 @@ static int cmd_grep(int argc, char ** argv) {
         }
         lpat[j] = 0;
         if (!re_compile(lpat)) {
-            cx_err("grep: bad pattern\n");
+            rt_err("grep: bad pattern\n");
             return 1;
         }
         char buf[4096];
@@ -1231,16 +1236,16 @@ static int cmd_grep(int argc, char ** argv) {
                 if (!(flags & G_COUNT)) {
                     if (flags & G_NUMBER) {
                         cx_putint(1, line_no);
-                        cx_out(":", 1);
+                        rt_out(":", 1);
                     }
-                    cx_write(1, buf, n);
+                    rt_write(1, buf, n);
                 }
             }
             n = cx_getline(0, buf, 4096);
         }
         if (flags & G_COUNT) {
             cx_putint(1, matches);
-            cx_out("\n", 1);
+            rt_out("\n", 1);
         }
         if (matches == 0) {
             rc = 1;
@@ -1428,7 +1433,7 @@ static int cmd_sed(int argc, char ** argv) {
         if (strcmp(argv[i], "-e") == 0 && i + 1 < argc) {
             i++;
             if (sed_parse_one(argv[i]) < 0) {
-                cx_err("sed: bad expression\n");
+                rt_err("sed: bad expression\n");
                 return 1;
             }
         }
@@ -1437,13 +1442,13 @@ static int cmd_sed(int argc, char ** argv) {
     // non-flag arg is an expression if no -e was given
     if (sed_nc == 0 && i < argc) {
         if (sed_parse_one(argv[i]) < 0) {
-            cx_err("sed: bad expression\n");
+            rt_err("sed: bad expression\n");
             return 1;
         }
         i++;
     }
     if (sed_nc == 0) {
-        cx_err("sed: missing expression\n");
+        rt_err("sed: missing expression\n");
         return 1;
     }
     // read all lines to detect last line for '$' address
@@ -1483,12 +1488,12 @@ static int cmd_sed(int argc, char ** argv) {
                 if (sed_cmd[ci] == 'd') {
                     deleted = 1;
                 } else if (sed_cmd[ci] == 'p') {
-                    cx_write(1, out, oi);
-                    cx_out("\n", 1);
+                    rt_write(1, out, oi);
+                    rt_out("\n", 1);
                 } else if (sed_cmd[ci] == 'q') {
                     if (!suppress) {
-                        cx_write(1, out, oi);
-                        cx_out("\n", 1);
+                        rt_write(1, out, oi);
+                        rt_out("\n", 1);
                     }
                     quit = 1;
                 } else if (sed_cmd[ci] == 's') {
@@ -1504,8 +1509,8 @@ static int cmd_sed(int argc, char ** argv) {
         }
         line[llen] = saved;
         if (!deleted && !quit && !suppress) {
-            cx_write(1, out, oi);
-            cx_out("\n", 1);
+            rt_write(1, out, oi);
+            rt_out("\n", 1);
         }
         if (quit) { break; }
         li++;
@@ -1520,11 +1525,11 @@ static void uniq_emit(char * line, int len, int count, int sc) {
         if (sc) {
             char num[16];
             int nlen = cx_itopad(count, num, 4);
-            cx_write(1, num, nlen);
-            cx_out(" ", 1);
+            rt_write(1, num, nlen);
+            rt_out(" ", 1);
         }
-        cx_write(1, line, len);
-        cx_out("\n", 1);
+        rt_write(1, line, len);
+        rt_out("\n", 1);
     }
 }
 
@@ -1624,7 +1629,7 @@ static int cmd_sort(int argc, char ** argv) {
         }
         int z = 0;
         while (z < l.count) {
-            cx_write(1, l.data[z], l.lens[z]);
+            rt_write(1, l.data[z], l.lens[z]);
             z++;
         }
     }
@@ -1635,7 +1640,7 @@ static int cmd_sort(int argc, char ** argv) {
 static int cmd_printf(int argc, char ** argv) {
     int rc = 0;
     if (argc < 2) {
-        cx_err("printf: missing format\n");
+        rt_err("printf: missing format\n");
         rc = 1;
     }
     if (!rc) {
@@ -1646,20 +1651,20 @@ static int cmd_printf(int argc, char ** argv) {
             if (fmt[p] == '\\') {
                 p++;
                 if (fmt[p] == 'n') {
-                    cx_out("\n", 1);
+                    rt_out("\n", 1);
                 } else if (fmt[p] == 't') {
-                    cx_out("\t", 1);
+                    rt_out("\t", 1);
                 } else if (fmt[p] == '\\') {
-                    cx_out("\\", 1);
+                    rt_out("\\", 1);
                 } else {
-                    cx_write(1, fmt + p, 1);
+                    rt_write(1, fmt + p, 1);
                 }
                 p++;
             } else if (fmt[p] == '%') {
                 p++;
                 if (fmt[p] == 's') {
                     if (ai < argc) {
-                        cx_puts(argv[ai]);
+                        rt_puts(argv[ai]);
                         ai++;
                     }
                     p++;
@@ -1671,16 +1676,16 @@ static int cmd_printf(int argc, char ** argv) {
                     p++;
                 } else if (fmt[p] == 'c') {
                     if (ai < argc) {
-                        cx_write(1, argv[ai], 1);
+                        rt_write(1, argv[ai], 1);
                         ai++;
                     }
                     p++;
                 } else if (fmt[p] == '%') {
-                    cx_out("%", 1);
+                    rt_out("%", 1);
                     p++;
                 }
             } else {
-                cx_write(1, fmt + p, 1);
+                rt_write(1, fmt + p, 1);
                 p++;
             }
         }
@@ -1696,8 +1701,8 @@ struct cx_stat {
     int uid;
 };
 
-static void cx_writes(int fd, char * s) {
-    cx_write(fd, s, strlen(s));
+static void rt_writes(int fd, char * s) {
+    rt_write(fd, s, strlen(s));
 }
 
 static int dir_exists(char * path) {
@@ -1754,7 +1759,7 @@ static int copy_file(char * src, char * dst) {
             char buf[4096];
             int n = read(sfd, buf, 4096);
             while (n > 0) {
-                cx_write(dfd, buf, n);
+                rt_write(dfd, buf, n);
                 n = read(sfd, buf, 4096);
             }
             close(dfd);
@@ -1828,10 +1833,10 @@ static int cmd_pwd(int argc, char ** argv) {
     char buf[4096];
     char * p = getcwd(buf, 4096);
     if (p) {
-        cx_puts(buf);
-        cx_out("\n", 1);
+        rt_puts(buf);
+        rt_out("\n", 1);
     } else {
-        cx_err("pwd: cannot get cwd\n");
+        rt_err("pwd: cannot get cwd\n");
         rc = 1;
     }
     return rc;
@@ -1843,9 +1848,9 @@ static int cmd_touch(int argc, char ** argv) {
     while (i < argc && !rc) {
         int fd = open(argv[i], 1 | O_CREAT, 420);
         if (fd < 0) {
-            cx_err("touch: cannot create: ");
-            cx_err(argv[i]);
-            cx_err("\n");
+            rt_err("touch: cannot create: ");
+            rt_err(argv[i]);
+            rt_err("\n");
             rc = 1;
         } else {
             close(fd);
@@ -1877,9 +1882,9 @@ static int cmd_mkdir(int argc, char ** argv) {
             r = mkdir(argv[i], 493);
         }
         if (r != 0) {
-            cx_err("mkdir: cannot create: ");
-            cx_err(argv[i]);
-            cx_err("\n");
+            rt_err("mkdir: cannot create: ");
+            rt_err(argv[i]);
+            rt_err("\n");
             rc = 1;
         }
         i++;
@@ -1892,9 +1897,9 @@ static int cmd_rmdir(int argc, char ** argv) {
     int i = 1;
     while (i < argc && !rc) {
         if (rmdir(argv[i]) != 0) {
-            cx_err("rmdir: cannot remove: ");
-            cx_err(argv[i]);
-            cx_err("\n");
+            rt_err("rmdir: cannot remove: ");
+            rt_err(argv[i]);
+            rt_err("\n");
             rc = 1;
         }
         i++;
@@ -1932,9 +1937,9 @@ static int cmd_rm(int argc, char ** argv) {
             r = unlink(argv[i]);
         }
         if (r != 0 && !force) {
-            cx_err("rm: cannot remove: ");
-            cx_err(argv[i]);
-            cx_err("\n");
+            rt_err("rm: cannot remove: ");
+            rt_err(argv[i]);
+            rt_err("\n");
             rc = 1;
         }
         i++;
@@ -1945,16 +1950,16 @@ static int cmd_rm(int argc, char ** argv) {
 static int cmd_cp(int argc, char ** argv) {
     int rc = 0;
     if (argc < 3) {
-        cx_err("cp: usage: cp SRC DST\n");
+        rt_err("cp: usage: cp SRC DST\n");
         rc = 1;
     }
     if (!rc) {
         if (copy_file(argv[1], argv[2]) != 0) {
-            cx_err("cp: failed: ");
-            cx_err(argv[1]);
-            cx_err(" -> ");
-            cx_err(argv[2]);
-            cx_err("\n");
+            rt_err("cp: failed: ");
+            rt_err(argv[1]);
+            rt_err(" -> ");
+            rt_err(argv[2]);
+            rt_err("\n");
             rc = 1;
         }
     }
@@ -1964,16 +1969,16 @@ static int cmd_cp(int argc, char ** argv) {
 static int cmd_mv(int argc, char ** argv) {
     int rc = 0;
     if (argc < 3) {
-        cx_err("mv: usage: mv SRC DST\n");
+        rt_err("mv: usage: mv SRC DST\n");
         rc = 1;
     }
     if (!rc) {
         if (rename(argv[1], argv[2]) != 0) {
-            cx_err("mv: failed: ");
-            cx_err(argv[1]);
-            cx_err(" -> ");
-            cx_err(argv[2]);
-            cx_err("\n");
+            rt_err("mv: failed: ");
+            rt_err(argv[1]);
+            rt_err(" -> ");
+            rt_err(argv[2]);
+            rt_err("\n");
             rc = 1;
         }
     }
@@ -1995,7 +2000,7 @@ static int cmd_ln(int argc, char ** argv) {
         i++;
     }
     if (argc - i < 2) {
-        cx_err("ln: need target and link name\n");
+        rt_err("ln: need target and link name\n");
         rc = 1;
     }
     if (!rc) {
@@ -2008,7 +2013,7 @@ static int cmd_ln(int argc, char ** argv) {
             r = link(target, linkname);
         }
         if (r != 0) {
-            cx_err("ln: failed\n");
+            rt_err("ln: failed\n");
             rc = 1;
         }
     }
@@ -2018,7 +2023,7 @@ static int cmd_ln(int argc, char ** argv) {
 static int cmd_chmod(int argc, char ** argv) {
     int rc = 0;
     if (argc < 3) {
-        cx_err("chmod: usage: chmod MODE FILE\n");
+        rt_err("chmod: usage: chmod MODE FILE\n");
         rc = 1;
     }
     if (!rc) {
@@ -2041,9 +2046,9 @@ static int cmd_chmod(int argc, char ** argv) {
             if (symbolic) {
                 struct cx_stat st;
                 if (stat(argv[j], (void*)&st) != 0) {
-                    cx_err("chmod: cannot stat: ");
-                    cx_err(argv[j]);
-                    cx_err("\n");
+                    rt_err("chmod: cannot stat: ");
+                    rt_err(argv[j]);
+                    rt_err("\n");
                     rc = 1;
                 } else {
                     mode = st.mode & 4095; // keep low 12 bits
@@ -2095,17 +2100,17 @@ static int cmd_chmod(int argc, char ** argv) {
                         if (*p == ',') { p++; }
                     }
                     if (chmod(argv[j], mode) != 0) {
-                        cx_err("chmod: failed: ");
-                        cx_err(argv[j]);
-                        cx_err("\n");
+                        rt_err("chmod: failed: ");
+                        rt_err(argv[j]);
+                        rt_err("\n");
                         rc = 1;
                     }
                 }
             } else {
                 if (chmod(argv[j], mode) != 0) {
-                    cx_err("chmod: failed: ");
-                    cx_err(argv[j]);
-                    cx_err("\n");
+                    rt_err("chmod: failed: ");
+                    rt_err(argv[j]);
+                    rt_err("\n");
                     rc = 1;
                 }
             }
@@ -2122,9 +2127,9 @@ static int cmd_cd(int argc, char ** argv) {
         target = argv[1];
     }
     if (chdir(target) != 0) {
-        cx_err("cd: cannot chdir: ");
-        cx_err(target);
-        cx_err("\n");
+        rt_err("cd: cannot chdir: ");
+        rt_err(target);
+        rt_err("\n");
         rc = 1;
     }
     return rc;
@@ -2145,10 +2150,10 @@ static int cmd_env(int argc, char ** argv) {
     while (known[i]) {
         char * v = getenv(known[i]);
         if (v) {
-            cx_puts(known[i]);
-            cx_out("=", 1);
-            cx_puts(v);
-            cx_out("\n", 1);
+            rt_puts(known[i]);
+            rt_out("=", 1);
+            rt_puts(v);
+            rt_out("\n", 1);
         }
         i++;
     }
@@ -2158,19 +2163,19 @@ static int cmd_env(int argc, char ** argv) {
 static int cmd_install(int argc, char ** argv) {
     int rc = 0;
     if (argc < 2) {
-        cx_err("install: usage: install DIR\n");
+        rt_err("install: usage: install DIR\n");
         rc = 1;
     }
     char cwd[4096];
     if (!rc) {
         if (mkdir_p(argv[1]) != 0) {
-            cx_err("install: cannot create target\n");
+            rt_err("install: cannot create target\n");
             rc = 1;
         }
     }
     if (!rc) {
         if (getcwd(cwd, 4096) == 0) {
-            cx_err("install: cannot get cwd\n");
+            rt_err("install: cannot get cwd\n");
             rc = 1;
         }
     }
@@ -2188,18 +2193,18 @@ static int cmd_install(int argc, char ** argv) {
             memcpy(path + tl, cmds[i].name, nl + 1);
             int fd = open(path, 1 | O_CREAT | O_TRUNC, 493);
             if (fd < 0) {
-                cx_err("install: cannot write: ");
-                cx_err(path);
-                cx_err("\n");
+                rt_err("install: cannot write: ");
+                rt_err(path);
+                rt_err("\n");
                 rc = 1;
             } else {
-                cx_writes(fd, "#!/bin/sh\nexec ");
-                cx_writes(fd, cwd);
-                cx_writes(fd, "/build/cx ");
-                cx_writes(fd, cwd);
-                cx_writes(fd, "/toys.c ");
-                cx_writes(fd, cmds[i].name);
-                cx_writes(fd, " \"$@\"\n");
+                rt_writes(fd, "#!/bin/sh\nexec ");
+                rt_writes(fd, cwd);
+                rt_writes(fd, "/build/cx ");
+                rt_writes(fd, cwd);
+                rt_writes(fd, "/toys.c ");
+                rt_writes(fd, cmds[i].name);
+                rt_writes(fd, " \"$@\"\n");
                 close(fd);
             }
             i++;
@@ -2300,39 +2305,39 @@ static int cmd_ls(int argc, char ** argv) {
         if (long_fmt) {
             char perms[12];
             ls_perms(fst.mode, perms);
-            cx_puts(perms);
-            cx_out("  ", 2);
+            rt_puts(perms);
+            rt_out("  ", 2);
             char nb[16];
             cx_itopad(fst.nlink, nb, 2);
-            cx_puts(nb);
-            cx_out(" ", 1);
+            rt_puts(nb);
+            rt_out(" ", 1);
             if (human) {
                 char hb[16];
                 ls_human_size(fst.size, hb);
                 int hl = strlen(hb);
                 int pad = 5 - hl;
-                while (pad > 0) { cx_out(" ", 1); pad--; }
-                cx_puts(hb);
+                while (pad > 0) { rt_out(" ", 1); pad--; }
+                rt_puts(hb);
             } else {
                 cx_itopad(fst.size, nb, 8);
-                cx_puts(nb);
+                rt_puts(nb);
             }
-            cx_out(" ", 1);
+            rt_out(" ", 1);
         }
-        cx_puts(dir);
-        cx_out("\n", 1);
+        rt_puts(dir);
+        rt_out("\n", 1);
         argi++;
         continue;
     }
     if (arg_count > 1) {
-        cx_puts(dir);
-        cx_out(":\n", 2);
+        rt_puts(dir);
+        rt_out(":\n", 2);
     }
     void * dp = opendir(dir);
     if (dp == 0) {
-        cx_err("ls: cannot open: ");
-        cx_err(dir);
-        cx_err("\n");
+        rt_err("ls: cannot open: ");
+        rt_err(dir);
+        rt_err("\n");
         rc = 1;
     }
     if (!rc) {
@@ -2385,29 +2390,29 @@ static int cmd_ls(int argc, char ** argv) {
                 if (stat(path, (void*)&st) == 0) {
                     char perms[12];
                     ls_perms(st.mode, perms);
-                    cx_puts(perms);
-                    cx_out("  ", 2);
+                    rt_puts(perms);
+                    rt_out("  ", 2);
                     char nb[16];
                     cx_itopad(st.nlink, nb, 2);
-                    cx_puts(nb);
-                    cx_out(" ", 1);
+                    rt_puts(nb);
+                    rt_out(" ", 1);
                     if (human) {
                         char hb[16];
                         ls_human_size(st.size, hb);
                         int hl = strlen(hb);
                         // right-align to 5 chars
                         int pad = 5 - hl;
-                        while (pad > 0) { cx_out(" ", 1); pad--; }
-                        cx_puts(hb);
+                        while (pad > 0) { rt_out(" ", 1); pad--; }
+                        rt_puts(hb);
                     } else {
                         cx_itopad(st.size, nb, 8);
-                        cx_puts(nb);
+                        rt_puts(nb);
                     }
-                    cx_out(" ", 1);
+                    rt_out(" ", 1);
                 }
             }
-            cx_puts(n);
-            cx_out("\n", 1);
+            rt_puts(n);
+            rt_out("\n", 1);
             j++;
         }
         free(names);
@@ -2449,8 +2454,8 @@ static int find_walk(char * path, char * name_pat, char tf) {
             }
         }
         if (show) {
-            cx_puts(path);
-            cx_out("\n", 1);
+            rt_puts(path);
+            rt_out("\n", 1);
         }
         if ((st.mode & S_IFMT) == S_IFDIR) {
             void * dp = opendir(path);
@@ -2520,7 +2525,7 @@ static int cmd_find(int argc, char ** argv) {
 static int cmd_xargs(int argc, char ** argv) {
     int rc = 0;
     if (argc < 2) {
-        cx_err("xargs: usage: xargs CMD [ARGS...]\n");
+        rt_err("xargs: usage: xargs CMD [ARGS...]\n");
         return 1;
     }
     struct sb sb_input;
@@ -2641,7 +2646,7 @@ static int cmd_test(int argc, char ** argv) {
     int ok = 1;
     if (strcmp(argv[0], "[") == 0) {
         if (argc < 2 || strcmp(argv[argc - 1], "]") != 0) {
-            cx_err("[: missing ]\n");
+            rt_err("[: missing ]\n");
             ok = 0;
         } else {
             end = argc - 1;
@@ -2668,7 +2673,7 @@ static int cmd_test(int argc, char ** argv) {
 static int cmd_which(int argc, char ** argv) {
     int rc = 0;
     if (argc < 2) {
-        cx_err("which: usage: which NAME\n");
+        rt_err("which: usage: which NAME\n");
         rc = 1;
     }
     if (!rc) {
@@ -2696,8 +2701,8 @@ static int cmd_which(int argc, char ** argv) {
                         memcpy(full + dlen + 1,
                                name, nlen + 1);
                         if (access(full, X_OK) == 0) {
-                            cx_puts(full);
-                            cx_out("\n", 1);
+                            rt_puts(full);
+                            rt_out("\n", 1);
                             found = 1;
                         }
                     }
@@ -2714,7 +2719,7 @@ static int cmd_which(int argc, char ** argv) {
 
 static int cmd_type(int argc, char ** argv) {
     if (argc < 2) {
-        cx_err("type: usage: type NAME...\n");
+        rt_err("type: usage: type NAME...\n");
         return 1;
     }
     int rc = 0;
@@ -2724,14 +2729,14 @@ static int cmd_type(int argc, char ** argv) {
         // check shell-only builtins first
         if (strcmp(name, "set") == 0 || strcmp(name, "export") == 0 ||
             strcmp(name, "source") == 0 || strcmp(name, "type") == 0) {
-            cx_puts(name); cx_out(" is a shell builtin\n", 20);
+            rt_puts(name); rt_out(" is a shell builtin\n", 20);
         } else {
             // check registered commands
             int found = 0;
             int i = 0;
             while (i < ncmds && !found) {
                 if (strcmp(name, cmds[i].name) == 0) {
-                    cx_puts(name); cx_out(" is a shell builtin\n", 20);
+                    rt_puts(name); rt_out(" is a shell builtin\n", 20);
                     found = 1;
                 }
                 i++;
@@ -2754,8 +2759,8 @@ static int cmd_type(int argc, char ** argv) {
                                 full[dlen] = '/';
                                 memcpy(full + dlen + 1, name, nlen + 1);
                                 if (access(full, X_OK) == 0) {
-                                    cx_puts(name); cx_out(" is ", 4);
-                                    cx_puts(full); cx_out("\n", 1);
+                                    rt_puts(name); rt_out(" is ", 4);
+                                    rt_puts(full); rt_out("\n", 1);
                                     found = 1;
                                 }
                             }
@@ -2764,9 +2769,9 @@ static int cmd_type(int argc, char ** argv) {
                     }
                 }
                 if (!found) {
-                    cx_err("type: ");
-                    cx_err(name);
-                    cx_err(": not found\n");
+                    rt_err("type: ");
+                    rt_err(name);
+                    rt_err(": not found\n");
                     rc = 1;
                 }
             }
@@ -3045,10 +3050,10 @@ static void sh_run_tokens(int start, int end);
 static int cmd_sh_set(int argc, char ** argv) {
     int i = 0;
     while (i < sh_var_count) {
-        cx_puts(sh_var_names + i * 64);
-        cx_out("=", 1);
-        cx_puts(sh_var_vals + i * 256);
-        cx_out("\n", 1);
+        rt_puts(sh_var_names + i * 64);
+        rt_out("=", 1);
+        rt_puts(sh_var_vals + i * 256);
+        rt_out("\n", 1);
         i++;
     }
     return 0;
@@ -3059,11 +3064,11 @@ static int cmd_sh_export(int argc, char ** argv) {
         int i = 0;
         while (i < sh_var_count) {
             if (sh_var_exported[i]) {
-                cx_err("export ");
-                cx_err(sh_var_names + i * 64);
-                cx_err("=");
-                cx_err(sh_var_vals + i * 256);
-                cx_err("\n");
+                rt_err("export ");
+                rt_err(sh_var_names + i * 64);
+                rt_err("=");
+                rt_err(sh_var_vals + i * 256);
+                rt_err("\n");
             }
             i++;
         }
@@ -3171,9 +3176,9 @@ static int sh_exec_segment(int start, int end) {
     if (has_stdin) {
         int fd = open(stdin_path, 0);
         if (fd < 0) {
-            cx_err("sh: cannot open: ");
-            cx_err(stdin_path);
-            cx_err("\n");
+            rt_err("sh: cannot open: ");
+            rt_err(stdin_path);
+            rt_err("\n");
             rc = 1;
         } else {
             saved_in = dup2(0, 100);
@@ -3190,9 +3195,9 @@ static int sh_exec_segment(int start, int end) {
         }
         int fd = open(stdout_path, flags, 420);
         if (fd < 0) {
-            cx_err("sh: cannot open: ");
-            cx_err(stdout_path);
-            cx_err("\n");
+            rt_err("sh: cannot open: ");
+            rt_err(stdout_path);
+            rt_err("\n");
             rc = 1;
         } else {
             saved_out = dup2(1, 101);
@@ -3222,9 +3227,9 @@ static int sh_exec_segment(int start, int end) {
              strcmp(argv[0], ".") == 0)) {
             int fd = open(argv[1], 0);
             if (fd < 0) {
-                cx_err("source: cannot open: ");
-                cx_err(argv[1]);
-                cx_err("\n");
+                rt_err("source: cannot open: ");
+                rt_err(argv[1]);
+                rt_err("\n");
                 rc = 1;
             } else {
                 char * sb_back = (char*)malloc(16384);
@@ -3421,22 +3426,22 @@ static int cmd_date(int argc, char ** argv) {
         res[5] = lt->tm_sec;
 #endif
         cx_putint(1, res[0]);
-        cx_out("-", 1);
-        if (res[1] < 10) { cx_out("0", 1); }
+        rt_out("-", 1);
+        if (res[1] < 10) { rt_out("0", 1); }
         cx_putint(1, res[1]);
-        cx_out("-", 1);
-        if (res[2] < 10) { cx_out("0", 1); }
+        rt_out("-", 1);
+        if (res[2] < 10) { rt_out("0", 1); }
         cx_putint(1, res[2]);
-        cx_out(" ", 1);
-        if (res[3] < 10) { cx_out("0", 1); }
+        rt_out(" ", 1);
+        if (res[3] < 10) { rt_out("0", 1); }
         cx_putint(1, res[3]);
-        cx_out(":", 1);
-        if (res[4] < 10) { cx_out("0", 1); }
+        rt_out(":", 1);
+        if (res[4] < 10) { rt_out("0", 1); }
         cx_putint(1, res[4]);
-        cx_out(":", 1);
-        if (res[5] < 10) { cx_out("0", 1); }
+        rt_out(":", 1);
+        if (res[5] < 10) { rt_out("0", 1); }
         cx_putint(1, res[5]);
-        cx_out("\n", 1);
+        rt_out("\n", 1);
         return 0;
     }
     return 1;
@@ -3444,7 +3449,7 @@ static int cmd_date(int argc, char ** argv) {
 
 static int cmd_sleep(int argc, char ** argv) {
     if (argc < 2) {
-        cx_err("sleep: missing operand\n");
+        rt_err("sleep: missing operand\n");
         return 1;
     }
     sleep(atoi(argv[1]));
@@ -3453,7 +3458,7 @@ static int cmd_sleep(int argc, char ** argv) {
 
 static int cmd_kill(int argc, char ** argv) {
     if (argc < 2) {
-        cx_err("kill: missing operand\n");
+        rt_err("kill: missing operand\n");
         return 1;
     }
     int sig = 15;
@@ -3465,7 +3470,7 @@ static int cmd_kill(int argc, char ** argv) {
         pid = atoi(argv[1]);
     }
     if (kill(pid, sig) != 0) {
-        cx_err("kill: failed\n");
+        rt_err("kill: failed\n");
         return 1;
     }
     return 0;
@@ -3476,9 +3481,9 @@ static int cmd_ps(int argc, char ** argv) {
     struct cx_stat st;
     int have_proc = stat("/proc/1", (void*)&st) == 0;
     if (have_proc) {
-        cx_puts("  PID STATE COMMAND\n");
+        rt_puts("  PID STATE COMMAND\n");
         void * dp = opendir("/proc");
-        if (!dp) { cx_err("ps: cannot open /proc\n"); return 1; }
+        if (!dp) { rt_err("ps: cannot open /proc\n"); return 1; }
         char * name = (char*)readdir(dp);
         while (name) {
             // only numeric directories are PIDs
@@ -3525,14 +3530,14 @@ static int cmd_ps(int argc, char ** argv) {
                 }
                 char nb[16];
                 cx_itopad(atoi(name), nb, 5);
-                cx_puts(nb);
-                cx_out(" ", 1);
+                rt_puts(nb);
+                rt_out(" ", 1);
                 char sb[4];
                 sb[0] = ' '; sb[1] = ' '; sb[2] = state; sb[3] = ' ';
-                cx_write(1, sb, 4);
-                cx_out(" ", 1);
-                cx_puts(comm);
-                cx_out("\n", 1);
+                rt_write(1, sb, 4);
+                rt_out(" ", 1);
+                rt_puts(comm);
+                rt_out("\n", 1);
             }
             name = (char*)readdir(dp);
         }
@@ -3573,7 +3578,7 @@ static void rl_esc(char c) {
     buf[0] = 27;
     buf[1] = '[';
     buf[2] = c;
-    cx_write(2, buf, 3);
+    rt_write(2, buf, 3);
 }
 
 static void rl_esc_n(int n, char c) {
@@ -3584,16 +3589,16 @@ static void rl_esc_n(int n, char c) {
     int len = cx_itoa(n, nb);
     memcpy(buf + 2, nb, len);
     buf[2 + len] = c;
-    cx_write(2, buf, 3 + len);
+    rt_write(2, buf, 3 + len);
 }
 
 static void rl_redraw(char * prompt, int plen, char * buf,
                        int len, int pos) {
-    cx_write(2, "\r", 1);
-    cx_write(2, prompt, plen);
-    if (len > 0) { cx_write(2, buf, len); }
+    rt_write(2, "\r", 1);
+    rt_write(2, prompt, plen);
+    if (len > 0) { rt_write(2, buf, len); }
     rl_esc('K');
-    cx_write(2, "\r", 1);
+    rt_write(2, "\r", 1);
     if (plen + pos > 0) { rl_esc_n(plen + pos, 'C'); }
 }
 
@@ -3605,7 +3610,7 @@ static int sh_readline(char * buf, int size, char * prompt) {
     char saved[1024];
     saved[0] = 0;
     buf[0] = 0;
-    cx_write(2, prompt, plen);
+    rt_write(2, prompt, plen);
     termraw(0, 1);
     char ch[2];
     int done = 0;
@@ -3618,13 +3623,13 @@ static int sh_readline(char * buf, int size, char * prompt) {
             result = -1;
             done = 1;
         } else if (ch[0] == 13 || ch[0] == 10) {
-            cx_write(2, "\r\n", 2);
+            rt_write(2, "\r\n", 2);
             buf[len] = 0;
             if (len > 0) { rl_hist_add(buf); }
             result = len;
             done = 1;
         } else if (ch[0] == 4 && len == 0) {
-            cx_write(2, "\r\n", 2);
+            rt_write(2, "\r\n", 2);
             result = -1;
             done = 1;
         } else if (ch[0] == 4 && pos < len) {
@@ -3637,8 +3642,8 @@ static int sh_readline(char * buf, int size, char * prompt) {
             pos = 0;
             buf[0] = 0;
             termraw(0, 0);
-            cx_write(2, "^C\r\n", 4);
-            cx_write(2, prompt, plen);
+            rt_write(2, "^C\r\n", 4);
+            rt_write(2, prompt, plen);
             termraw(0, 1);
         } else if (ch[0] == 1) {
             pos = 0;
@@ -3660,7 +3665,7 @@ static int sh_readline(char * buf, int size, char * prompt) {
             char cls[7];
             cls[0] = 27; cls[1] = '['; cls[2] = '2'; cls[3] = 'J';
             cls[4] = 27; cls[5] = '['; cls[6] = 'H';
-            cx_write(2, cls, 7);
+            rt_write(2, cls, 7);
             rl_redraw(prompt, plen, buf, len, pos);
         } else if (ch[0] == 127 || ch[0] == 8) {
             if (pos > 0) {
@@ -3835,17 +3840,17 @@ static int sh_readline(char * buf, int size, char * prompt) {
                 }
             } else if (mcount > 1) {
                 // multiple matches — show them
-                cx_write(2, "\r\n", 2);
+                rt_write(2, "\r\n", 2);
                 int mi = 0;
                 char * mp = matches;
                 while (mi < mcount) {
                     int ml = strlen(mp);
-                    cx_write(2, mp, ml);
-                    cx_write(2, "  ", 2);
+                    rt_write(2, mp, ml);
+                    rt_write(2, "  ", 2);
                     mp = mp + ml + 1;
                     mi++;
                 }
-                cx_write(2, "\r\n", 2);
+                rt_write(2, "\r\n", 2);
                 rl_redraw(prompt, plen, buf, len, pos);
             }
             free(matches);
@@ -3914,7 +3919,7 @@ static void vi_sput(char * s, int n) {
 static void vi_sputs(char * s) { vi_sput(s, strlen(s)); }
 
 static void vi_sflush(void) {
-    if (vi_sn > 0) { cx_write(1, vi_scr, vi_sn); vi_sn = 0; }
+    if (vi_sn > 0) { rt_write(1, vi_scr, vi_sn); vi_sn = 0; }
 }
 
 static void vi_sputc(int c) {
@@ -4045,8 +4050,8 @@ static int vi_save(void) {
     int i = 0;
     int bytes = 0;
     while (i < vi_nl) {
-        cx_write(fd, vi_ld[i], vi_ll[i]);
-        cx_write(fd, "\n", 1);
+        rt_write(fd, vi_ld[i], vi_ll[i]);
+        rt_write(fd, "\n", 1);
         bytes = bytes + vi_ll[i] + 1;
         i++;
     }
@@ -4736,11 +4741,11 @@ static void cx_find(char * argv0) {
 
 static int cmd_cx(int argc, char ** argv) {
     if (argc < 2) {
-        cx_err("usage: cx FILE.c [ARGS...]\n");
+        rt_err("usage: cx FILE.c [ARGS...]\n");
         return 1;
     }
     if (cx_path[0] == 0) {
-        cx_err("cx: cannot find cx binary\n");
+        rt_err("cx: cannot find cx binary\n");
         return 1;
     }
     struct sb cmd;
@@ -4760,8 +4765,8 @@ static int cmd_cx(int argc, char ** argv) {
 static int cmd_help(int argc, char ** argv) {
     int i = 0;
     while (i < ncmds) {
-        cx_err(cmds[i].help);
-        cx_err("\n");
+        rt_err(cmds[i].help);
+        rt_err("\n");
         i++;
     }
     return 0;
@@ -4787,9 +4792,9 @@ static int cmd_sh(int argc, char ** argv) {
         }
         fd = open(argv[1], 0);
         if (fd < 0) {
-            cx_err("sh: cannot open ");
-            cx_err(argv[1]);
-            cx_err("\n");
+            rt_err("sh: cannot open ");
+            rt_err(argv[1]);
+            rt_err("\n");
             return 1;
         }
     }
@@ -4897,15 +4902,15 @@ static int dispatch(char * name, int argc, char ** argv) {
         }
     }
     if (!fn) {
-        cx_err("toys: unknown command: ");
-        cx_err(name);
-        cx_err("\n");
+        rt_err("toys: unknown command: ");
+        rt_err(name);
+        rt_err("\n");
         return 1;
     }
     if (argc > 1 && strcmp(argv[1], "--help") == 0) {
-        cx_err("usage: ");
-        cx_err(help);
-        cx_err("\n");
+        rt_err("usage: ");
+        rt_err(help);
+        rt_err("\n");
         return 0;
     }
     if (argc > 1 && strcmp(argv[1], "--") == 0) {

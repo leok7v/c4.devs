@@ -142,12 +142,12 @@ One file: `toy.c`. Sections:
 ### Error output
 
 All error messages go to stderr (fd 2) from Stage 0
-onward. The cx_err helper writes directly via write()
+onward. The rt_err helper writes directly via rt_write()
 to avoid printf buffering issues. Every command uses
-cx_err for diagnostics, never printf.
+rt_err for diagnostics, never printf.
 
-    void cx_err(char *msg) {
-        write(2, msg, strlen(msg));
+    void rt_err(char *msg) {
+        rt_write(2, msg, strlen(msg));
     }
 
 This is a foundation utility, not an afterthought.
@@ -490,9 +490,9 @@ commands, handles the printf/write quirk.
 - Utility library: cx_strchr cx_strrchr cx_strstr
   cx_atoi cx_itoa cx_itopad cx_putint cx_isdigit
   cx_isspace cx_isalpha cx_tolower cx_getline
-  cx_openrd cx_puts cx_out cx_err readall
-- cx_err writes to stderr (fd 2) from day one.
-  All commands use cx_err for error messages.
+  cx_openrd rt_puts rt_out rt_err readall
+- rt_err writes to stderr (fd 2) from day one.
+  All commands use rt_err for error messages.
 - Dispatch table and main()
 - Trivial commands: true false echo yes
   basename dirname seq
@@ -952,7 +952,7 @@ between platforms and cx code should not care.
    Future: mmap'd shared memory buffers (noted in
    Stage 5 and Stage 6 stretch goals).
 
-3. **Error output.** cx_err (write to fd 2) is a Stage 0
+3. **Error output.** rt_err (write to fd 2) is a Stage 0
    deliverable. Every command uses it from day one.
    Never printf for diagnostics.
 
