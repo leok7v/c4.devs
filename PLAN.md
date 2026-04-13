@@ -1005,11 +1005,12 @@ between platforms and cx code should not care.
         sh_expand_prompt() expands \w (basename cwd), \W (full cwd),
         \u ($USER), \h ($HOSTNAME short), \$ (literal $), \n (newline),
         plus $VAR expansion. Default PS1='\w$ ' (matches prior behavior).
-    [ ] Stage 10 — shell UX polish (candidates):
-        (a) ~ expansion: expand ~ to $HOME at start of words
-        (b) type/which builtin: "type echo" → "echo is a shell builtin"
-        (c) tab completion for registered command names
-        (d) $((expr)) arithmetic expansion (basic +,-,*,/,%)
+    [x] Stage 10 — shell UX polish:
+        (a) ~ expansion: ~ and ~/path expand to $HOME
+        (b) type builtin: classifies builtins vs PATH executables
+        (c) tab completion for registered command names (single/multi match)
+    [ ] Stage 11 — cx.c: float, double, unsigned, long long
+    [ ] Stage 12 — sh: $((expr)) arithmetic expansion (needs Stage 11)
 
 ---
 

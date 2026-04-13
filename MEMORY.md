@@ -5,6 +5,34 @@ Each entry links back to the commit(s) that implemented it.
 
 ---
 
+## 2026-04-12 — Stage 10 completed: PS1 prompt, ~, type, tab completion
+
+Commits: `b384a49`..current (3 commits)
+
+1. **sed malloc fix** — replaced 256KB stack `char lines[262144]` with
+   `malloc(sed_cap * sed_lw)` to avoid stack overflow risk.
+
+2. **PS1 customizable prompt** — `sh_expand_prompt()` does two-pass
+   expansion: first backslash escapes (`\w` cwd basename, `\W` full cwd,
+   `\u` user, `\h` hostname, `\$` literal, `\n` newline), then `$VAR`
+   expansion via `sh_expand_word()`. Default `PS1='\w$ '` preserves
+   prior behavior.
+
+3. **~ expansion** — `sh_expand_word()` expands `~` and `~/path` to
+   `$HOME` at the start of words. Enables `cd ~`, `ls ~/foo`.
+
+4. **type builtin** — `type echo` → `"echo is a shell builtin"`,
+   `type gcc` → `"gcc is /usr/bin/gcc"`. Checks shell-only builtins
+   (set, export, source, type), registered commands, then PATH.
+
+5. **Tab completion** — pressing Tab in readline completes against
+   registered command names. Single match auto-completes with trailing
+   space; multiple matches are listed on a new line.
+
+All 45/45 tests pass on both native and self-hosted paths.
+
+---
+
 ## 2026-04-12 — Stages 7-9 completed: vi, shell, regex, full sed, ps, ls -lah
 
 Commits: `6f02dca`..`230d5c4` (8 commits)

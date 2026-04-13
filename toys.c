@@ -2589,6 +2589,70 @@ static int cmd_which(int argc, char ** argv) {
     return rc;
 }
 
+static int cmd_type(int argc, char ** argv) {
+    if (argc < 2) {
+        cx_err("type: usage: type NAME...\n");
+        return 1;
+    }
+    int rc = 0;
+    int ai = 1;
+    while (ai < argc) {
+        char * name = argv[ai];
+        // check shell-only builtins first
+        if (strcmp(name, "set") == 0 || strcmp(name, "export") == 0 ||
+            strcmp(name, "source") == 0 || strcmp(name, "type") == 0) {
+            cx_puts(name); cx_out(" is a shell builtin\n", 20);
+        } else {
+            // check registered commands
+            int found = 0;
+            int i = 0;
+            while (i < ncmds && !found) {
+                if (strcmp(name, cmds[i].name) == 0) {
+                    cx_puts(name); cx_out(" is a shell builtin\n", 20);
+                    found = 1;
+                }
+                i++;
+            }
+            if (!found) {
+                // check PATH
+                char * path = getenv("PATH");
+                if (path) {
+                    int p = 0;
+                    int plen = strlen(path);
+                    while (p < plen && !found) {
+                        int e = p;
+                        while (e < plen && path[e] != ':') { e++; }
+                        int dlen = e - p;
+                        if (dlen > 0) {
+                            char full[4096];
+                            int nlen = strlen(name);
+                            if (dlen + 1 + nlen < 4096) {
+                                memcpy(full, path + p, dlen);
+                                full[dlen] = '/';
+                                memcpy(full + dlen + 1, name, nlen + 1);
+                                if (access(full, X_OK) == 0) {
+                                    cx_puts(name); cx_out(" is ", 4);
+                                    cx_puts(full); cx_out("\n", 1);
+                                    found = 1;
+                                }
+                            }
+                        }
+                        p = e + 1;
+                    }
+                }
+                if (!found) {
+                    cx_err("type: ");
+                    cx_err(name);
+                    cx_err(": not found\n");
+                    rc = 1;
+                }
+            }
+        }
+        ai++;
+    }
+    return rc;
+}
+
 static int dispatch(char * name, int argc, char ** argv);
 
 enum {
@@ -2740,6 +2804,16 @@ static void sh_tokenize(char * line) {
 static void sh_expand_word(char * src, char * dst, int max) {
     int i = 0;
     int o = 0;
+    // ~ expansion at start of word: ~ or ~/...
+    if (src[0] == '~' && (src[1] == 0 || src[1] == '/')) {
+        char * home = getenv("HOME");
+        if (home) {
+            while (home[0] && o < max - 1) {
+                dst[o] = home[0]; o++; home++;
+            }
+        }
+        i = 1; // skip the ~, keep the /... part
+    }
     while (src[i] && o < max - 1) {
         if (src[i] == '$') {
             i++;
@@ -3505,6 +3579,64 @@ static int sh_readline(char * buf, int size, char * prompt) {
                             rl_redraw(prompt, plen, buf, len, pos);
                         }
                     }
+                }
+            }
+        } else if (ch[0] == 9) {
+            // Tab completion: find word under cursor
+            int ws = pos;
+            while (ws > 0 && buf[ws - 1] != ' ') { ws--; }
+            int wlen = pos - ws;
+            if (wlen > 0) {
+                char prefix[256];
+                if (wlen > 255) { wlen = 255; }
+                memcpy(prefix, buf + ws, wlen);
+                prefix[wlen] = 0;
+                // collect matches from registered commands
+                char matches[2048]; // packed: name\0name\0...
+                int moff = 0;
+                int mcount = 0;
+                char * last_match = 0;
+                int ci = 0;
+                while (ci < ncmds) {
+                    if (strncmp(cmds[ci].name, prefix, wlen) == 0) {
+                        int nlen = strlen(cmds[ci].name);
+                        if (moff + nlen + 1 < 2048) {
+                            memcpy(matches + moff, cmds[ci].name, nlen + 1);
+                            last_match = matches + moff;
+                            moff = moff + nlen + 1;
+                            mcount++;
+                        }
+                    }
+                    ci++;
+                }
+                if (mcount == 1) {
+                    // single match — complete it
+                    int nlen = strlen(last_match);
+                    int add = nlen - wlen;
+                    if (len + add + 1 < size) {
+                        memmove(buf + pos + add + 1,
+                                buf + pos, len - pos);
+                        memcpy(buf + pos, last_match + wlen, add);
+                        buf[pos + add] = ' ';
+                        len = len + add + 1;
+                        pos = pos + add + 1;
+                        buf[len] = 0;
+                        rl_redraw(prompt, plen, buf, len, pos);
+                    }
+                } else if (mcount > 1) {
+                    // multiple matches — show them
+                    cx_write(2, "\r\n", 2);
+                    int mi = 0;
+                    char * mp = matches;
+                    while (mi < mcount) {
+                        int ml = strlen(mp);
+                        cx_write(2, mp, ml);
+                        cx_write(2, "  ", 2);
+                        mp = mp + ml + 1;
+                        mi++;
+                    }
+                    cx_write(2, "\r\n", 2);
+                    rl_redraw(prompt, plen, buf, len, pos);
                 }
             }
         } else if (ch[0] >= 32 && len < size - 1) {
@@ -4359,6 +4491,7 @@ static void setup(void) {
     cmd_reg("test", cmd_test, "test EXPRESSION");
     cmd_reg("[", cmd_test, "[ EXPRESSION ]");
     cmd_reg("which", cmd_which, "which NAME");
+    cmd_reg("type", cmd_type, "type NAME...");
     cmd_reg("date", cmd_date, "date");
     cmd_reg("sleep", cmd_sleep, "sleep SECONDS");
     cmd_reg("kill", cmd_kill, "kill [-SIG] PID");
