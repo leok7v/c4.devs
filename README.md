@@ -29,7 +29,7 @@ Try the following
 
     ./build/cx cx.c hello.c
     ./build/cx cx.c cx.c hello.c
-    ./build/cx cx.c cx.c test/tests.c
+    ./build/cx cx.c cx.c tests/all.c
 
 Command Line Options
 --------------------
@@ -40,7 +40,7 @@ Command Line Options
 
 Run tests:
 
-    ./build/cx test/tests.c
+    ./build/cx tests/all.c
 
 Documentation
 -------------

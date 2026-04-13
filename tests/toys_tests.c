@@ -19,21 +19,21 @@ int main(void) {
     int fail = 0;
     int total = 0;
     total++;
-    if (run("test/toys_foundation.c")) { fail++; }
+    if (run("tests/toys_foundation.c")) { fail++; }
     total++;
-    if (run("test/toys_stream.c")) { fail++; }
+    if (run("tests/toys_stream.c")) { fail++; }
     total++;
-    if (run("test/toys_text.c")) { fail++; }
+    if (run("tests/toys_text.c")) { fail++; }
     total++;
-    if (run("test/toys_intrinsics.c")) { fail++; }
+    if (run("tests/toys_intrinsics.c")) { fail++; }
     total++;
-    if (run("test/toys_filesystem.c")) { fail++; }
+    if (run("tests/toys_filesystem.c")) { fail++; }
     total++;
-    if (run("test/toys_shell.c")) { fail++; }
+    if (run("tests/toys_shell.c")) { fail++; }
     total++;
-    if (run("test/toys_selfhost.c")) { fail++; }
+    if (run("tests/toys_selfhost.c")) { fail++; }
     total++;
-    if (run("test/toys_advanced.c")) { fail++; }
+    if (run("tests/toys_advanced.c")) { fail++; }
     printf("\n%d/%d passed\n", total - fail, total);
     return fail ? -1 : 0;
 }

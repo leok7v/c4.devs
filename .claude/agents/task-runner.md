@@ -94,7 +94,7 @@ crash mid-run leaves a trail.
 - Read TASK.md.
 - Read `.claude/rules/project-context.md` for the lay of the land.
 - If the work touches `cx.c`, read `.claude/rules/cx-constraints.md`.
-- If it touches `toys.c` or `test/toys_*.c`, read
+- If it touches `toys.c` or `tests/toys_*.c`, read
   `.claude/rules/toys-conventions.md`.
 - List sub-tasks. Identify files you'll read, files you'll edit,
   and commands you'll run.
@@ -116,9 +116,9 @@ crash mid-run leaves a trail.
 ### 3. Verify
 
 Verification is a gate, not a lap. For any change to
-`cx.c` / `toys.c` / `test/*.c`, invoke the **build-and-test** skill:
+`cx.c` / `toys.c` / `tests/*.c`, invoke the **build-and-test** skill:
 
-    cc -Wall -Wpedantic -o build/cx cx.c && build/cx cx.c test/tests.c
+    cc -Wall -Wpedantic -o build/cx cx.c && build/cx cx.c tests/all.c
 
 The acceptance line is `SUMMARY: 45/45 tests passed.` Anything less
 is a regression. Copy that line verbatim into the Evidence section.

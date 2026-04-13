@@ -4,7 +4,7 @@
 
 c4 is a minimal self-compiling C compiler by Robert Swierczek. It compiles a subset of C
 to bytecode and interprets it in a stack-based VM. The entire compiler fits in ~800 lines of C.
-It can compile its own source: `./build/c4 c4.c test/struct_simple.c`.
+It can compile its own source: `./build/c4 c4.c tests/struct_simple.c`.
 
 ---
 
@@ -84,15 +84,15 @@ POPN, PCLS, FRED, MCPY, MMOV, SCPY, SCMP, SLEN, SCAT, SNCM, DUP
 cc -o build/c4 c4.c -O3 -m64 -std=c11 -Wall
 
 # Run individual tests
-./build/c4 test/struct_simple.c
-./build/c4 test/grok.c
-./build/c4 test/loops.c
+./build/c4 tests/struct_simple.c
+./build/c4 tests/grok.c
+./build/c4 tests/loops.c
 
 # Self-compilation test (c4 compiles itself, then runs a test)
-timeout 10 ./build/c4 c4.c test/struct_simple.c
+timeout 10 ./build/c4 c4.c tests/struct_simple.c
 
 # Cross-check with system compiler
-cc test/grok.c -o ./tmp/grok && ./tmp/grok
+cc tests/grok.c -o ./tmp/grok && ./tmp/grok
 
 ### Compiler Notes
 
@@ -101,7 +101,7 @@ cc test/grok.c -o ./tmp/grok && ./tmp/grok
 - All examples in this guide use `cc`
 
 # Full test suite
-./build/c4 test/test.c
+./build/c4 tests/test.c
 ```
 
 ### Temporary files
@@ -110,7 +110,7 @@ Use `./tmp/` (gitignored) for all temporary test files and debugging output — 
 This avoids VSCode permission prompts and keeps scratch work in the project directory.
 
 ```sh
-cc test/grok.c -o ./tmp/grok && ./tmp/grok
+cc tests/grok.c -o ./tmp/grok && ./tmp/grok
 cat > ./tmp/mytest.c << 'EOF'
 ...
 EOF
@@ -121,15 +121,15 @@ EOF
 
 All test files include `<stdio.h>` so they compile with both c4 and cc/gcc/clang.
 
-- `test/grok.c` — padding, sizeof(struct), cast, struct ptr arith
-- `test/arrays.c` — all array types including struct arrays
-- `test/loops.c` — for/while/do-while with break/continue, scoped for declarations
-- `test/struct_ptr_arith.c` — pointer arithmetic, pre/post increment
-- `test/struct_simple.c`, `test/struct_nested.c` — basic struct operations
-- `test/int32_64.c` — int32_t/int64_t operations
-- `test/io.c` — file I/O (open/read/write)
-- `test/scope.c` — block-scoped declarations, init-in-declaration, (void) params
-- `test/test.c` — test runner (discovers and runs all tests)
+- `tests/grok.c` — padding, sizeof(struct), cast, struct ptr arith
+- `tests/arrays.c` — all array types including struct arrays
+- `tests/loops.c` — for/while/do-while with break/continue, scoped for declarations
+- `tests/struct_ptr_arith.c` — pointer arithmetic, pre/post increment
+- `tests/struct_simple.c`, `tests/struct_nested.c` — basic struct operations
+- `tests/int32_64.c` — int32_t/int64_t operations
+- `tests/io.c` — file I/O (open/read/write)
+- `tests/scope.c` — block-scoped declarations, init-in-declaration, (void) params
+- `tests/test.c` — test runner (discovers and runs all tests)
 
 ### CI
 
@@ -144,7 +144,7 @@ int64_t format warnings), runs struct tests, io, self-compilation.
 `switch`, mid-block declarations, typedefs, unions, function pointers,
 variadics, and a cpp-style preprocessor, so most modern C is fair game.
 As of 2026-04-11 cx self-hosts the full 45-test suite end-to-end
-(`build/cx cx.c test/tests.c`) — see MEMORY.md for the fixes that got us
+(`build/cx cx.c tests/all.c`) — see MEMORY.md for the fixes that got us
 there. Still, a few sharp edges remain:
 
 - **No forward references to globals** — declare before use.
@@ -154,14 +154,14 @@ there. Still, a few sharp edges remain:
 - **Don't rely on `break;` inside a braced `{ ... }` in a switch case
   reaching the switch** — that path now works, but new control-flow
   additions should keep this pattern in mind; when in doubt, test under
-  self-host with `build/cx cx.c test/tests.c`.
+  self-host with `build/cx cx.c tests/all.c`.
 - **Local shadowing of non-zero globals works**, but only because the
   function prologue now assigns `id[Val] = i` unconditionally — watch
   this if you rework local-variable allocation.
 - **No `unsigned`, `float`, `double`** — not implemented.
 - **`int` = `int64_t` (8 bytes)** — use `(int)` casts for printf `%d`.
 - **Always verify after changes to cx.c**:
-  `cc -Wall -Wpedantic -o build/cx cx.c && build/cx cx.c test/tests.c`
+  `cc -Wall -Wpedantic -o build/cx cx.c && build/cx cx.c tests/all.c`
   (runs every test natively *and* through self-hosted cx).
 
 ---
@@ -246,7 +246,7 @@ Static named-param offsets make varargs nearly trivial:
   rebuilt single-spec format, forcing an `ll` length modifier for
   integer conversions so cx's int64 slots format correctly.
 
-Standard user pattern (see `test/sb.h`):
+Standard user pattern (see `tests/sb.h`):
 
 ```c
 #ifdef __cx__

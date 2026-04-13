@@ -1,7 +1,7 @@
 ---
 paths:
   - "toys.c"
-  - "test/toys_*.c"
+  - "tests/toys_*.c"
 ---
 # toys.c conventions
 
@@ -26,8 +26,8 @@ another process.
 ## Every command needs a test
 
 A new command in `toys.c` ships with at least one entry in the
-appropriate `test/toys_<stage>.c` file. The test runner
-(`test/tests.c`) picks up test files automatically; there is no
+appropriate `tests/toys_<stage>.c` file. The test runner
+(`tests/all.c`) picks up test files automatically; there is no
 manual registration step.
 
 ## Platform constants belong in `#if`-guarded blocks
@@ -38,7 +38,7 @@ platform checks through command bodies.
 
 ## Verify after touching toys.c
 
-    cc -Wall -Wpedantic -o build/cx cx.c && build/cx cx.c test/tests.c
+    cc -Wall -Wpedantic -o build/cx cx.c && build/cx cx.c tests/all.c
 
 Both native and self-hosted paths must pass. A toys.c change that
 regresses the self-host path usually means the toy code is

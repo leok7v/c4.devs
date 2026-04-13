@@ -35,7 +35,7 @@ jobs:
     - name: Run tests
       run: |
         set +e
-        output=$(build/cx test/tests.c 2>&1)
+        output=$(build/cx tests/all.c 2>&1)
         exit_code=$?
         set -e
         echo "$output"

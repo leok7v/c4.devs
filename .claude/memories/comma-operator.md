@@ -58,7 +58,7 @@ void skip_comma() { if (tk == Comma) { next(); } }
 This allows multiple declarators like `char *p, *lp,` to still work.
 
 ### 6. Created Test File
-**File**: test/comma.c
+**File**: tests/comma.c
 
 Tests:
 - Basic comma: `(1, 2, 3)` returns 3
@@ -83,10 +83,10 @@ Tests:
 ## Verification Commands
 ```sh
 # Direct test
-./cx test/comma.c  # exit(0) cycle = 206
+./cx tests/comma.c  # exit(0) cycle = 206
 
 # Self-compiled test  
-./cx cx.c test/comma.c  # exit(0) cycle = 617678
+./cx cx.c tests/comma.c  # exit(0) cycle = 617678
 
 # Both pass all tests
 ```

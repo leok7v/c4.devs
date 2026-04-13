@@ -37,7 +37,7 @@ if (!is_fnptr) { next(); }
 ```
 
 ### 3. Created Test File
-**File**: test/fnptr.c
+**File**: tests/fnptr.c
 - Tests function pointer declarations with and without params
 - Assignment and calling not tested (needs more work)
 
@@ -59,10 +59,10 @@ if (!is_fnptr) { next(); }
 ## Verification Commands
 ```sh
 # Declaration test
-./cx test/fnptr.c  # exit(0) cycle = 5
+./cx tests/fnptr.c  # exit(0) cycle = 5
 
 # Self-compilation
-./cx cx.c test/comma.c  # exit(0) - works
+./cx cx.c tests/comma.c  # exit(0) - works
 ```
 
 ## Notes

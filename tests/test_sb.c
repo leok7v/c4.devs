@@ -1,4 +1,4 @@
-#include "test/sb.h"
+#include "tests/sb.h"
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>

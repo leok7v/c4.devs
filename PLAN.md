@@ -196,26 +196,26 @@ not break Stage 1 commands.
 
 ### File naming
 
-    test/toys_<shortname>.c
+    tests/toys_<shortname>.c
 
 One test file per stage or per logical group of
 commands. Short, descriptive names:
 
-    test/toys_foundation.c  — Stage 0: dispatch, utils
-    test/toys_stream.c      — Stage 1: cat head tail etc
-    test/toys_text.c        — Stage 2: sort grep sed etc
-    test/toys_intrinsics.c  — Stage 3: stat readdir etc
-    test/toys_filesystem.c  — Stage 4: ls cp mv rm etc
-    test/toys_shell.c       — Stage 5: sh parsing, pipes
-    test/toys_selfhost.c    — self-hosting: cx→toy.c sh→cx
+    tests/toys_foundation.c  — Stage 0: dispatch, utils
+    tests/toys_stream.c      — Stage 1: cat head tail etc
+    tests/toys_text.c        — Stage 2: sort grep sed etc
+    tests/toys_intrinsics.c  — Stage 3: stat readdir etc
+    tests/toys_filesystem.c  — Stage 4: ls cp mv rm etc
+    tests/toys_shell.c       — Stage 5: sh parsing, pipes
+    tests/toys_selfhost.c    — self-hosting: cx→toy.c sh→cx
 
 ### Test runner
 
-    test/toys_tests.c
+    tests/toys_tests.c
 
 Executed as:
 
-    ./build/cx test/toys_tests.c
+    ./build/cx tests/toys_tests.c
 
 Runs all toy test files in stage order. Stops and
 reports on first failure. Returns 0 if all pass.
@@ -239,11 +239,11 @@ via system():
         int fail = 0;
         int total = 0;
         // Stage 0
-        total++; if (run("test/toys_foundation.c")) fail++;
+        total++; if (run("tests/toys_foundation.c")) fail++;
         // Stage 1
-        total++; if (run("test/toys_stream.c")) fail++;
+        total++; if (run("tests/toys_stream.c")) fail++;
         // Stage 2
-        total++; if (run("test/toys_text.c")) fail++;
+        total++; if (run("tests/toys_text.c")) fail++;
         // ... added as stages land
         printf("\n%d/%d passed\n", total-fail, total);
         return fail ? -1 : 0;
@@ -324,7 +324,7 @@ All temp files go to build/ (gitignored), not /tmp/.
 This avoids permission issues and keeps everything
 inside the project tree.
 
-### Stage 0 tests: test/toys_foundation.c
+### Stage 0 tests: tests/toys_foundation.c
 
     check_rc("./build/cx toy.c true", 0)
     check_rc("./build/cx toy.c false", 256)
@@ -340,7 +340,7 @@ inside the project tree.
     check("./build/cx toy.c seq 2 4", "2\n3\n4\n")
     check("./build/cx toy.c seq 0 2 6", "0\n2\n4\n6\n")
 
-### Stage 1 tests: test/toys_stream.c
+### Stage 1 tests: tests/toys_stream.c
 
 Create a test file via system(), then:
 
@@ -362,7 +362,7 @@ Create a test file via system(), then:
 Plus edge cases: empty input, single line, no
 trailing newline, binary data passthrough for cat.
 
-### Stage 2 tests: test/toys_text.c
+### Stage 2 tests: tests/toys_text.c
 
     check("echo -e 'c\na\nb' | ./build/cx toy.c sort",
           "a\nb\nc\n")
@@ -383,7 +383,7 @@ trailing newline, binary data passthrough for cat.
     check("echo 'hello' | ./build/cx toy.c "
           "sed s/hello/bye/", "bye\n")
 
-### Stage 3 tests: test/toys_intrinsics.c
+### Stage 3 tests: tests/toys_intrinsics.c
 
 Tests for each new cx.c intrinsic. These are plain
 cx test files (not toy.c tests) that directly call
@@ -399,7 +399,7 @@ the new intrinsics and verify return values:
     getenv("PATH") returns non-null
     unlink removes a file created by open+write
 
-### Stage 4 tests: test/toys_filesystem.c
+### Stage 4 tests: tests/toys_filesystem.c
 
     // setup
     system("./build/cx toy.c touch build/t1.txt")
@@ -416,7 +416,7 @@ the new intrinsics and verify return values:
              "build/a/b/c", 0)
     check_rc("./build/cx toy.c rm -r build/a", 0)
 
-### Stage 5 tests: test/toys_shell.c
+### Stage 5 tests: tests/toys_shell.c
 
     check("echo 'echo hello' | "
           "./build/cx toy.c sh",
@@ -437,7 +437,7 @@ the new intrinsics and verify return values:
           "./build/cx toy.c sh",
           "hello world\n")
 
-### Self-hosting test: test/toys_selfhost.c
+### Self-hosting test: tests/toys_selfhost.c
 
 Verifies the full recursive chain works:
 cx compiles toy.c → toy.c sh reads a script →
@@ -466,13 +466,13 @@ noted in the stretch goals.
 Build cx, then run the toy test suite:
 
     cc -o build/cx cx.c
-    ./build/cx test/toys_tests.c
+    ./build/cx tests/toys_tests.c
 
 Or run a single stage's tests:
 
-    ./build/cx test/toys_foundation.c
+    ./build/cx tests/toys_foundation.c
 
-The full cx test suite (test/tests.c) remains
+The full cx test suite (tests/all.c) remains
 separate and is not affected by toy.c tests.
 
 ---
@@ -496,8 +496,8 @@ commands, handles the printf/write quirk.
 - Dispatch table and main()
 - Trivial commands: true false echo yes
   basename dirname seq
-- test/toys_foundation.c — all utils + commands tested
-- test/toys_tests.c — runner with Stage 0 entry
+- tests/toys_foundation.c — all utils + commands tested
+- tests/toys_tests.c — runner with Stage 0 entry
 
 **Acceptance:**
 
@@ -505,7 +505,7 @@ commands, handles the printf/write quirk.
     ./build/cx toy.c echo hello    # prints "hello"
     ./build/cx toy.c true; echo $? # 0
     ./build/cx toy.c false; echo $? # 1
-    ./build/cx test/toys_tests.c   # all tests pass
+    ./build/cx tests/toys_tests.c   # all tests pass
 
 **Estimated size:** ~200 lines toy.c + ~80 lines tests
 
@@ -533,8 +533,8 @@ metadata needed.
 
 **Deliverables:**
 - All 11 commands in toy.c
-- test/toys_stream.c — tests for every command
-- test/toys_tests.c — updated with Stage 1 entry
+- tests/toys_stream.c — tests for every command
+- tests/toys_tests.c — updated with Stage 1 entry
 
 **Reference code:**
 - toybox: cat.c (68 lines), head.c (74), echo.c (62),
@@ -547,7 +547,7 @@ tac, tail.
 
 **Acceptance:**
 
-    ./build/cx test/toys_tests.c   # all tests pass
+    ./build/cx tests/toys_tests.c   # all tests pass
     echo "hello world" | ./build/cx toy.c rev
     ./build/cx toy.c seq 10 | ./build/cx toy.c tac
     ./build/cx toy.c cat file | ./build/cx toy.c wc
@@ -573,8 +573,8 @@ extraction, sorting. Still no filesystem metadata.
 
 **Deliverables:**
 - All 7 commands in toy.c
-- test/toys_text.c — tests for every command
-- test/toys_tests.c — updated with Stage 2 entry
+- tests/toys_text.c — tests for every command
+- tests/toys_tests.c — updated with Stage 2 entry
 
 **Reference code:**
 - shelljs: sed.js (95 lines — just line.replace per line),
@@ -595,7 +595,7 @@ extraction, sorting. Still no filesystem metadata.
 
 **Acceptance:**
 
-    ./build/cx test/toys_tests.c   # all tests pass
+    ./build/cx tests/toys_tests.c   # all tests pass
     echo -e "b\na\nc" | ./build/cx toy.c sort
     ./build/cx toy.c grep foo file.txt
     echo "hello world" | ./build/cx toy.c sed s/hello/goodbye/
@@ -661,13 +661,13 @@ simplified cx struct. cx code never sees the native layout.
 
 **Deliverables:**
 - cx.c with batch 1 intrinsics
-- test/toys_intrinsics.c — exercises every new intrinsic
-- test/toys_tests.c — updated with Stage 3 entry
+- tests/toys_intrinsics.c — exercises every new intrinsic
+- tests/toys_tests.c — updated with Stage 3 entry
 
 **Acceptance:**
 
-    ./build/cx test/toys_tests.c   # all tests pass
-    ./build/cx test/toys_intrinsics.c  # intrinsic tests
+    ./build/cx tests/toys_tests.c   # all tests pass
+    ./build/cx tests/toys_intrinsics.c  # intrinsic tests
 
 **Estimated cx.c changes:** ~80 lines (intrinsics) +
 ~30 lines (symbols) + ~20 lines (stat struct helper).
@@ -712,8 +712,8 @@ to PATH so installed commands are found automatically.
 
 **Deliverables:**
 - All 13 commands in toy.c
-- test/toys_filesystem.c — tests for every command
-- test/toys_tests.c — updated with Stage 4 entry
+- tests/toys_filesystem.c — tests for every command
+- tests/toys_tests.c — updated with Stage 4 entry
 
 **Reference code:**
 - toybox: ls.c (644), cp.c (544), rm.c (117), mkdir.c (44)
@@ -734,7 +734,7 @@ to PATH so installed commands are found automatically.
 
 **Acceptance:**
 
-    ./build/cx test/toys_tests.c   # all tests pass
+    ./build/cx tests/toys_tests.c   # all tests pass
     ./build/cx toy.c touch build/foo
     ./build/cx toy.c ls build/
     ./build/cx toy.c cp build/foo build/bar
@@ -773,9 +773,9 @@ for builtins. rc/Plan9-inspired, not POSIX sh.
 
 **Deliverables:**
 - cmd_sh in toy.c
-- test/toys_shell.c — tests for P0 and P1 features
-- test/toys_selfhost.c — self-hosting recursion test
-- test/toys_tests.c — updated with Stage 5 entries
+- tests/toys_shell.c — tests for P0 and P1 features
+- tests/toys_selfhost.c — self-hosting recursion test
+- tests/toys_tests.c — updated with Stage 5 entries
 
 **Shell architecture:**
 
@@ -832,7 +832,7 @@ caching, warm VM reuse) is a Stage 6+ concern.
 
 **Acceptance:**
 
-    ./build/cx test/toys_tests.c   # all tests pass
+    ./build/cx tests/toys_tests.c   # all tests pass
     echo "echo hello" | ./build/cx toy.c sh
     echo "ls | grep .c | sort" | ./build/cx toy.c sh
     echo 'X=world; echo hello $X' | ./build/cx toy.c sh
@@ -957,7 +957,7 @@ between platforms and cx code should not care.
    Never printf for diagnostics.
 
 4. **Self-hosting test.** Explicit test file:
-   test/toys_selfhost.c. Exercises the full recursive
+   tests/toys_selfhost.c. Exercises the full recursive
    chain: cx → toy.c sh → system → cx → toy.c cmd.
    Speed is not a concern now. Performance optimization
    (bytecode caching, warm VM) deferred to Stage 6.
@@ -977,7 +977,7 @@ between platforms and cx code should not care.
     [x] Stage 5b — shell P2 features + tests pass
     [x] Stage 6 — stretch goals: realloc, find, xargs, test, which, date, sleep, kill
     [x] Stage 6 — PIC and PID implementation (relative jumps and offsets)
-    [x] cx self-hosts cleanly — test/tests.c runs every test twice (native
+    [x] cx self-hosts cleanly — tests/all.c runs every test twice (native
         and cx-on-cx), 45/45 passing on both paths. See MEMORY.md for the
         five bugs that had to be fixed to get here.
     [x] Stage 6 — regex engine (~180 lines, adapted from tiny-regex-c):

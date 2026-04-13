@@ -14,9 +14,9 @@ Agent Harnesses" (Pan et al., arXiv 2603.25723, Mar 2026).
     ├── rules/
     │   ├── project-context.md     # always loaded — repo overview
     │   ├── cx-constraints.md      # paths: cx.c — self-host rules
-    │   └── toys-conventions.md    # paths: toys.c, test/toys_*.c
+    │   └── toys-conventions.md    # paths: toys.c, tests/toys_*.c
     ├── skills/
-    │   ├── build-and-test/
+    │   ├── build-and-tests/
     │   │   └── SKILL.md           # the 45/45 gate
     │   ├── self-host-check/
     │   │   └── SKILL.md           # native vs self-host diff
@@ -73,13 +73,13 @@ artifacts, not source. Don't commit them.
 
 ## The one verification gate
 
-Anything that touches `cx.c`, `toys.c`, or `test/*.c` is only done
+Anything that touches `cx.c`, `toys.c`, or `tests/*.c` is only done
 when this passes with 45/45 on both paths:
 
-    cc -Wall -Wpedantic -o build/cx cx.c && build/cx cx.c test/tests.c
+    cc -Wall -Wpedantic -o build/cx cx.c && build/cx cx.c tests/all.c
 
 The `build-and-test` skill is the canonical way to run it. The test
-runner (`test/tests.c`) runs every test twice — natively and through
+runner (`tests/all.c`) runs every test twice — natively and through
 self-hosted cx — so both paths are covered in one command.
 
 ## Relationship to the root docs

@@ -2,11 +2,11 @@
 #include <string.h>
 
 char embedded[] = {
-    #embed "test/embed_data.txt", 0
+    #embed "tests/embed_data.txt", 0
 };
 
 int raw_bytes[] = {
-    #embed "test/embed_data.txt"
+    #embed "tests/embed_data.txt"
 };
 
 int main() {

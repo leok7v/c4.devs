@@ -40,7 +40,7 @@ Once you have a minimal failing file, shrink it:
   certainly names the pattern you just hit.
 
 Keep the shrunken reproducer in `tmp/` (gitignored) while you work.
-Don't add it to `test/` unless the fix lands alongside it.
+Don't add it to `tests/` unless the fix lands alongside it.
 
 ## Don't
 

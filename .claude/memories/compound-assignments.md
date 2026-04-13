@@ -45,7 +45,7 @@ case AddAssign:
 Key insight: Change load to push+load, then push value for operation, then store result.
 
 ### 3. Created Test File
-**File**: test/compound.c
+**File**: tests/compound.c
 - Tests all 10 compound assignment operators
 - Tests chained assignments (x += 1; x *= 2; x -= 1;)
 - Returns 0 if all pass, non-zero error code if any fail
@@ -58,7 +58,7 @@ Key insight: Change load to push+load, then push value for operation, then store
 
 ### 5. Verified Self-Compilation
 - Compiled cx.c with gcc: `gcc -o cx cx.c -D_GNU_SOURCE`
-- Self-compiled: `./cx cx.c test/compound.c`
+- Self-compiled: `./cx cx.c tests/compound.c`
 - Both pass all tests (exit 0)
 
 ## Code Impact
@@ -71,8 +71,8 @@ Key insight: Change load to push+load, then push value for operation, then store
 ## Verification Commands
 ```sh
 # Direct test
-./cx test/compound.c  # exit(0) cycle = 211
+./cx tests/compound.c  # exit(0) cycle = 211
 
 # Self-compiled test
-./cx cx.c test/compound.c  # exit(0) cycle = 781722
+./cx cx.c tests/compound.c  # exit(0) cycle = 781722
 ```

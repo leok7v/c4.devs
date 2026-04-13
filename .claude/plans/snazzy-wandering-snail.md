@@ -1,7 +1,7 @@
 # Plan: Consolidate Grok improvements, extend tests, clean docs, add memories
 
 ## Context
-Grok reviewed our c4.c and identified 3 valid improvements (struct padding, sizeof struct, struct cast) among many incorrect claims. We need to adopt those 3 improvements, fix test/grok.c for c4 compatibility, add `#include` headers to all tests so they compile with cc/gcc too, clean up stale docs, and create CLAUDE.md for project memory.
+Grok reviewed our c4.c and identified 3 valid improvements (struct padding, sizeof struct, struct cast) among many incorrect claims. We need to adopt those 3 improvements, fix tests/grok.c for c4 compatibility, add `#include` headers to all tests so they compile with cc/gcc too, clean up stale docs, and create CLAUDE.md for project memory.
 
 ## Changes
 
@@ -46,7 +46,7 @@ else if (tk == Struct) { next(); if (tk == Id && id[Class] == Struct) { t = id[T
 ```
 
 ### 4. Add #include headers to ALL test files
-Each test file gets headers so `cc test/foo.c -o /tmp/foo && /tmp/foo` works alongside `./build/c4 test/foo.c`. c4 ignores `#` lines, so this is safe.
+Each test file gets headers so `cc tests/foo.c -o /tmp/foo && /tmp/foo` works alongside `./build/c4 tests/foo.c`. c4 ignores `#` lines, so this is safe.
 
 | File(s) | Headers needed |
 |---------|---------------|
@@ -59,7 +59,7 @@ Each test file gets headers so `cc test/foo.c -o /tmp/foo && /tmp/foo` works alo
 | test.c | `<stdio.h>`, `<stdlib.h>`, `<string.h>` |
 | ptr_test.c | already has `<stdio.h>` |
 
-### 5. Rewrite test/grok.c for c4 compatibility
+### 5. Rewrite tests/grok.c for c4 compatibility
 Grok's test uses c4-incompatible syntax:
 - `int32_t x = 10;` → split to `int32_t x; x = 10;`
 - `struct Point *pp = pts;` → split to `struct Point *pp; pp = pts;`
@@ -93,17 +93,17 @@ Key facts to persist:
 - Arrays use id[Extent] field, type becomes elem_type + PTR
 - c4's `int` = int64_t (8 bytes), different from cc/gcc (4 bytes)
 - All code must self-compile: no forward refs, no mid-block decls, no complex macros
-- Test with: direct (./build/c4 test/X.c) and self-comp (./build/c4 c4.c test/X.c)
+- Test with: direct (./build/c4 tests/X.c) and self-comp (./build/c4 c4.c tests/X.c)
 - Build: clang -o build/c4 c4.c -O3 -m64 -std=c11 -Wall
 - CI: .github/workflows/ci.yml, uses -w flag for Linux format warnings
 
 ## Verification
 1. `clang -o build/c4 c4.c -O3 -m64 -std=c11 -Wall` — clean build
-2. `./build/c4 test/grok.c` — padding, sizeof struct, struct ptr arith pass
-3. `./build/c4 test/arrays.c` — arrays still pass
-4. `./build/c4 test/struct/simple.c` etc. — all struct tests pass
-5. `./build/c4 test/struct_ptr_arith.c` — struct pointer arithmetic passes
-6. `./build/c4 test/int32_64.c` — int32/64 still passes
-7. `timeout 10 ./build/c4 c4.c test/struct/simple.c` — self-compilation works
-8. `cc test/grok.c -o /tmp/grok && /tmp/grok` — test compiles/runs with cc too
-9. `cc test/arrays.c -o /tmp/arrays && /tmp/arrays` — arrays test works with cc
+2. `./build/c4 tests/grok.c` — padding, sizeof struct, struct ptr arith pass
+3. `./build/c4 tests/arrays.c` — arrays still pass
+4. `./build/c4 tests/struct/simple.c` etc. — all struct tests pass
+5. `./build/c4 tests/struct_ptr_arith.c` — struct pointer arithmetic passes
+6. `./build/c4 tests/int32_64.c` — int32/64 still passes
+7. `timeout 10 ./build/c4 c4.c tests/struct/simple.c` — self-compilation works
+8. `cc tests/grok.c -o /tmp/grok && /tmp/grok` — test compiles/runs with cc too
+9. `cc tests/arrays.c -o /tmp/arrays && /tmp/arrays` — arrays test works with cc

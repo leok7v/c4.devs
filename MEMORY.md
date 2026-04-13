@@ -68,7 +68,7 @@ All 45/45 tests pass on both native and self-hosted paths.
 
 Commit: `76d5663` — cx.c: fix self-hosting bugs so every test passes under cx-on-cx
 
-`test/tests.c` now runs every test twice — once natively, once through
+`tests/all.c` now runs every test twice — once natively, once through
 self-hosted cx (`build/cx cx.c <test>`) — and all 45 pass on both paths.
 Getting there required closing five bugs that had been lurking in the
 self-hosting path:

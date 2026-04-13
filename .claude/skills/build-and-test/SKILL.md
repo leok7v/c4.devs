@@ -1,21 +1,21 @@
 ---
 name: build-and-test
 description: Rebuild cx and run the full dual-path test suite. Use
-  after any change to cx.c, toys.c, or test/*.c. Passes only when
+  after any change to cx.c, toys.c, or tests/*.c. Passes only when
   every test returns 45/45 under both native and self-hosted paths.
 allowed-tools: Bash, Read
 ---
 
 # build-and-test
 
-The project's single verification gate. `test/tests.c` runs every
+The project's single verification gate. `tests/all.c` runs every
 test twice — once natively (`build/cx <file>`) and once through
 self-hosted cx (`build/cx cx.c <file>`). A change is not done until
 both paths report `SUMMARY: 45/45 tests passed.`
 
 ## The command
 
-    cc -Wall -Wpedantic -o build/cx cx.c && build/cx cx.c test/tests.c
+    cc -Wall -Wpedantic -o build/cx cx.c && build/cx cx.c tests/all.c
 
 That's it. No flags, no selection — run the whole suite. Selecting
 a subset hides regressions in other tests the change might have

@@ -24,8 +24,8 @@ int main(int argc, char **argv) {
             i++;
         }
     } else {
-        printf("Discovering tests in test/ directory...\n");
-        int fp = popen("ls test/*.c", "r");
+        printf("Discovering tests in tests/ directory...\n");
+        int fp = popen("ls tests/*.c", "r");
         if (!fp) { printf("Failed to list tests\n"); return -1; }
         char *buf = malloc(1024);
         memset(buf, 0, 1024);
@@ -39,10 +39,10 @@ int main(int argc, char **argv) {
                 *ptr = 0;
                 int len = strlen(filename);
                 int is_self = 0;
-                if (len >= 7) {
-                    char *end = filename + len - 7;
-                    if (strcmp(end, "tests.c") == 0) {
-                        is_self = (len == 7) ? 1 : (*(end-1) == '/');
+                if (len >= 5) {
+                    char *end = filename + len - 5;
+                    if (strcmp(end, "all.c") == 0) {
+                        is_self = (len == 5) ? 1 : (*(end-1) == '/');
                     }
                 }
                 if (!is_self && len > 0) {

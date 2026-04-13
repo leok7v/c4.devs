@@ -55,6 +55,6 @@ for real. Don't re-stub these to `a = -1; break;`.
 
 ## Verify after touching cx.c
 
-    cc -Wall -Wpedantic -o build/cx cx.c && build/cx cx.c test/tests.c
+    cc -Wall -Wpedantic -o build/cx cx.c && build/cx cx.c tests/all.c
 
 Expect `SUMMARY: 45/45 tests passed.` Anything less is a regression.

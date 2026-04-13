@@ -1,5 +1,5 @@
 #include <stdio.h>
-#include "test/include.h"
+#include "tests/include.h"
 int check_substr(char *buf, char *sub) {
     char *b = buf;
     while (*b) {
@@ -64,7 +64,7 @@ int main() {
     len = 0;
     s = cx;
     while (*s) { cmd[len++] = *s++; }
-    s = " -DTRIGGER_ERROR test/include.c 2>&1";
+    s = " -DTRIGGER_ERROR tests/include.c 2>&1";
     while (*s) { cmd[len++] = *s++; }
     cmd[len] = 0;
     fp = popen(cmd, "r");
@@ -87,7 +87,7 @@ int main() {
     len = 0;
     s = cx;
     while (*s) { cmd[len++] = *s++; }
-    s = " -DCHECK_FLAG test/include.c 2>&1";
+    s = " -DCHECK_FLAG tests/include.c 2>&1";
     while (*s) { cmd[len++] = *s++; }
     cmd[len] = 0;
     fp = popen(cmd, "r");
@@ -110,7 +110,7 @@ int main() {
     len = 0;
     s = cx;
     while (*s) { cmd[len++] = *s++; }
-    s = " -DCHECK_FLAG=42 test/include.c 2>&1";
+    s = " -DCHECK_FLAG=42 tests/include.c 2>&1";
     while (*s) { cmd[len++] = *s++; }
     cmd[len] = 0;
     fp = popen(cmd, "r");
