@@ -5,6 +5,37 @@ Each entry links back to the commit(s) that implemented it.
 
 ---
 
+## 2026-04-12 — Stages 7-9 completed: vi, shell, regex, full sed, ps, ls -lah
+
+Commits: `6f02dca`..`230d5c4` (8 commits)
+
+Major deliverables in a single session:
+
+1. **vi editor** (~650 lines) — line-array based with normal/insert/ex modes,
+   alternate screen, /search, SIGWINCH resize, horizontal scroll.
+
+2. **Stage 8: cx as embedded interpreter** — `cx` shell builtin finds the cx
+   binary and runs .c files; cx.c skips `#!` shebang lines so `chmod +x file.c`
+   works; shell prompt shows `basename_of_cwd$ `.
+
+3. **Regex engine** (~180 lines) — adapted from tiny-regex-c (public domain).
+   Supports `.^$*+?[abc][^abc][a-z]\s\S\w\W\d\D`. Wired into both grep and sed.
+
+4. **Full sed** — addresses (line number, `$`, `/regex/`), ranges (`N,M`),
+   commands (`s///[g]`, `d`, `p`, `q`), `-n` suppress, `-e` multi-expression.
+   Replaces the old s///-only sed.
+
+5. **ps** — reads `/proc` on Linux, falls back to `system("ps")` on macOS.
+
+6. **ls -lah** — permissions string (`drwxr-xr-x`), nlink, human-readable sizes.
+
+7. **CI fix** — replaced raw `write()`/`read()` with `cx_write()` in vi and
+   readline code to satisfy gcc `-Wunused-result`. CI green.
+
+All 45/45 tests pass on both native and self-hosted paths.
+
+---
+
 ## 2026-04-11 — cx self-hosts cleanly, 45/45 tests pass on both paths
 
 Commit: `76d5663` — cx.c: fix self-hosting bugs so every test passes under cx-on-cx
