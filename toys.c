@@ -3007,7 +3007,7 @@ static void rl_esc(char c) {
     buf[0] = 27;
     buf[1] = '[';
     buf[2] = c;
-    write(2, buf, 3);
+    cx_write(2, buf, 3);
 }
 
 static void rl_esc_n(int n, char c) {
@@ -3018,16 +3018,16 @@ static void rl_esc_n(int n, char c) {
     int len = cx_itoa(n, nb);
     memcpy(buf + 2, nb, len);
     buf[2 + len] = c;
-    write(2, buf, 3 + len);
+    cx_write(2, buf, 3 + len);
 }
 
 static void rl_redraw(char * prompt, int plen, char * buf,
                        int len, int pos) {
-    write(2, "\r", 1);
-    write(2, prompt, plen);
-    if (len > 0) { write(2, buf, len); }
+    cx_write(2, "\r", 1);
+    cx_write(2, prompt, plen);
+    if (len > 0) { cx_write(2, buf, len); }
     rl_esc('K');
-    write(2, "\r", 1);
+    cx_write(2, "\r", 1);
     if (plen + pos > 0) { rl_esc_n(plen + pos, 'C'); }
 }
 
@@ -3039,7 +3039,7 @@ static int sh_readline(char * buf, int size, char * prompt) {
     char saved[1024];
     saved[0] = 0;
     buf[0] = 0;
-    write(2, prompt, plen);
+    cx_write(2, prompt, plen);
     termraw(0, 1);
     char ch[2];
     int done = 0;
@@ -3052,13 +3052,13 @@ static int sh_readline(char * buf, int size, char * prompt) {
             result = -1;
             done = 1;
         } else if (ch[0] == 13 || ch[0] == 10) {
-            write(2, "\r\n", 2);
+            cx_write(2, "\r\n", 2);
             buf[len] = 0;
             if (len > 0) { rl_hist_add(buf); }
             result = len;
             done = 1;
         } else if (ch[0] == 4 && len == 0) {
-            write(2, "\r\n", 2);
+            cx_write(2, "\r\n", 2);
             result = -1;
             done = 1;
         } else if (ch[0] == 4 && pos < len) {
@@ -3071,8 +3071,8 @@ static int sh_readline(char * buf, int size, char * prompt) {
             pos = 0;
             buf[0] = 0;
             termraw(0, 0);
-            write(2, "^C\r\n", 4);
-            write(2, prompt, plen);
+            cx_write(2, "^C\r\n", 4);
+            cx_write(2, prompt, plen);
             termraw(0, 1);
         } else if (ch[0] == 1) {
             pos = 0;
@@ -3094,7 +3094,7 @@ static int sh_readline(char * buf, int size, char * prompt) {
             char cls[7];
             cls[0] = 27; cls[1] = '['; cls[2] = '2'; cls[3] = 'J';
             cls[4] = 27; cls[5] = '['; cls[6] = 'H';
-            write(2, cls, 7);
+            cx_write(2, cls, 7);
             rl_redraw(prompt, plen, buf, len, pos);
         } else if (ch[0] == 127 || ch[0] == 8) {
             if (pos > 0) {
@@ -3221,7 +3221,7 @@ static void vi_sput(char * s, int n) {
 static void vi_sputs(char * s) { vi_sput(s, strlen(s)); }
 
 static void vi_sflush(void) {
-    if (vi_sn > 0) { write(1, vi_scr, vi_sn); vi_sn = 0; }
+    if (vi_sn > 0) { cx_write(1, vi_scr, vi_sn); vi_sn = 0; }
 }
 
 static void vi_sputc(int c) {
@@ -3312,11 +3312,14 @@ static int vi_load(char * filename) {
         strcpy(vi_msg, "[New file]");
         return 0;
     }
-    int sz = lseek(fd, 0, 2);
+    int sz = (int)lseek(fd, 0, 2);
+    if (sz < 0) { sz = 0; }
     lseek(fd, 0, 0);
     char * buf = (char *)malloc(sz + 1);
-    read(fd, buf, sz);
-    buf[sz] = 0;
+    int nr = (int)read(fd, buf, sz);
+    if (nr < 0) { nr = 0; }
+    buf[nr] = 0;
+    sz = nr;
     close(fd);
     int start = 0;
     int i = 0;
@@ -3349,8 +3352,8 @@ static int vi_save(void) {
     int i = 0;
     int bytes = 0;
     while (i < vi_nl) {
-        write(fd, vi_ld[i], vi_ll[i]);
-        write(fd, "\n", 1);
+        cx_write(fd, vi_ld[i], vi_ll[i]);
+        cx_write(fd, "\n", 1);
         bytes = bytes + vi_ll[i] + 1;
         i++;
     }
@@ -3488,9 +3491,9 @@ static int vi_readkey(void) {
     if (ch[0] == 'D') return VK_LEFT;
     if (ch[0] == 'H') return VK_HOME;
     if (ch[0] == 'F') return VK_END;
-    if (ch[0] == '3') { read(0, ch, 1); return VK_DEL; }
-    if (ch[0] == '5') { read(0, ch, 1); return VK_PGUP; }
-    if (ch[0] == '6') { read(0, ch, 1); return VK_PGDN; }
+    if (ch[0] == '3') { int r = read(0, ch, 1); (void)r; return VK_DEL; }
+    if (ch[0] == '5') { int r = read(0, ch, 1); (void)r; return VK_PGUP; }
+    if (ch[0] == '6') { int r = read(0, ch, 1); (void)r; return VK_PGDN; }
     return -1;
 }
 
@@ -3833,7 +3836,6 @@ static void cx_find(char * argv0) {
     char buf[4096];
     cx_path[0] = 0;
     // try directory of argv[0] (works for native builds: build/toys -> build/cx)
-    int len = strlen(argv0);
     char * sl = strrchr(argv0, '/');
     if (sl) {
         int dlen = sl - argv0;
