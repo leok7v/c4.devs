@@ -1472,7 +1472,6 @@ static int cmd_sed(int argc, char ** argv) {
         int lno = li + 1;
         int is_last = (li == total - 1);
         int deleted = 0;
-        int printed = 0;
         int quit = 0;
         char out[8192];
         int oi = llen;
@@ -1485,7 +1484,6 @@ static int cmd_sed(int argc, char ** argv) {
                 } else if (sed_cmd[ci] == 'p') {
                     cx_write(1, out, oi);
                     cx_out("\n", 1);
-                    printed = 1;
                 } else if (sed_cmd[ci] == 'q') {
                     if (!suppress) {
                         cx_write(1, out, oi);
@@ -3271,7 +3269,8 @@ static int cmd_ps(int argc, char ** argv) {
         closedir(dp);
     } else {
         // macOS fallback: use system ps and pipe to stdout
-        system("ps -eo pid,stat,comm");
+        int r = system("ps -eo pid,stat,comm");
+        (void)r;
     }
     return 0;
 }
