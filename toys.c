@@ -4439,6 +4439,144 @@ static void vi_insert(int k) {
 
 // --- vi ex mode ---
 
+static void vi_ex_sub(char * cmd) {
+    // parse :s/pat/rep/[gi]  :%s/pat/rep/[gi]  :N,Ms/pat/rep/[gi]
+    int from = vi_cy;
+    int to = vi_cy;
+    char * p = cmd;
+    // parse optional range
+    if (*p == '%') {
+        from = 0;
+        to = vi_nl - 1;
+        p++;
+    } else if (*p >= '0' && *p <= '9') {
+        from = 0;
+        while (*p >= '0' && *p <= '9') {
+            from = from * 10 + (*p - '0'); p++;
+        }
+        from--; // 1-based to 0-based
+        to = from;
+        if (*p == ',') {
+            p++;
+            if (*p == '$') {
+                to = vi_nl - 1; p++;
+            } else {
+                to = 0;
+                while (*p >= '0' && *p <= '9') {
+                    to = to * 10 + (*p - '0'); p++;
+                }
+                to--; // 1-based to 0-based
+            }
+        }
+    }
+    if (*p != 's') {
+        strcpy(vi_msg, "Unknown command");
+        return;
+    }
+    p++; // skip 's'
+    if (*p == 0) { strcpy(vi_msg, "No pattern"); return; }
+    char delim = *p; p++; // usually '/'
+    // extract pattern
+    char pat[256];
+    int pi = 0;
+    while (*p && *p != delim && pi < 255) {
+        pat[pi] = *p; pi++; p++;
+    }
+    pat[pi] = 0;
+    if (*p == delim) { p++; }
+    // extract replacement
+    char rep[256];
+    int ri = 0;
+    while (*p && *p != delim && ri < 255) {
+        rep[ri] = *p; ri++; p++;
+    }
+    rep[ri] = 0;
+    if (*p == delim) { p++; }
+    // parse flags
+    int global = 0;
+    int icase = 0;
+    while (*p) {
+        if (*p == 'g') { global = 1; }
+        if (*p == 'i') { icase = 1; }
+        p++;
+    }
+    // clamp range
+    if (from < 0) { from = 0; }
+    if (to >= vi_nl) { to = vi_nl - 1; }
+    if (from > to) { strcpy(vi_msg, "Invalid range"); return; }
+    // compile pattern (with case folding if needed)
+    char cpat[256];
+    if (icase) {
+        int k = 0;
+        while (pat[k]) { cpat[k] = tolower(pat[k]); k++; }
+        cpat[k] = 0;
+    } else {
+        strcpy(cpat, pat);
+    }
+    if (!re_compile(cpat)) {
+        strcpy(vi_msg, "Bad pattern");
+        return;
+    }
+    int total = 0;
+    int rlen = strlen(rep);
+    int li = from;
+    while (li <= to) {
+        char * line = vi_ld[li];
+        int llen = vi_ll[li];
+        char out[8192];
+        int oi = 0;
+        int pos = 0;
+        int did_one = 0;
+        while (pos < llen) {
+            int can = global || !did_one;
+            if (can) {
+                // for icase, build a lowered copy of remaining text
+                char lbuf[8192];
+                char * match_text = line + pos;
+                if (icase) {
+                    int k = 0;
+                    while (k < llen - pos) {
+                        lbuf[k] = tolower(line[pos + k]); k++;
+                    }
+                    lbuf[k] = 0;
+                    match_text = lbuf;
+                }
+                int ml = 0;
+                int mi = re_match(match_text, &ml);
+                if (mi >= 0) {
+                    // copy chars before match
+                    memcpy(out + oi, line + pos, mi);
+                    oi = oi + mi;
+                    // copy replacement
+                    memcpy(out + oi, rep, rlen);
+                    oi = oi + rlen;
+                    pos = pos + mi + (ml > 0 ? ml : 1);
+                    did_one = 1;
+                    total++;
+                } else {
+                    out[oi] = line[pos]; oi++; pos++;
+                }
+            } else {
+                out[oi] = line[pos]; oi++; pos++;
+            }
+        }
+        if (did_one) {
+            vi_lensure(li, oi);
+            memcpy(vi_ld[li], out, oi);
+            vi_ld[li][oi] = 0;
+            vi_ll[li] = oi;
+            vi_dirty = 1;
+        }
+        li++;
+    }
+    // build status message
+    char nb[16];
+    cx_itoa(total, nb);
+    strcpy(vi_msg, nb);
+    strcat(vi_msg, " substitution");
+    if (total != 1) { strcat(vi_msg, "s"); }
+}
+
 static void vi_ex_exec(void) {
     vi_ex_buf[vi_ex_len] = 0;
     if (vi_ex_pr == '/') {
@@ -4468,6 +4606,39 @@ static void vi_ex_exec(void) {
             strcpy(vi_file, fn);
             vi_save();
         }
+    } else if (cmd[0] >= '0' && cmd[0] <= '9') {
+        // check if pure number (line jump) or range/substitute
+        char * p = cmd;
+        while (*p >= '0' && *p <= '9') { p++; }
+        if (*p == 0) {
+            // :<number> — jump to line
+            int ln = 0;
+            p = cmd;
+            while (*p >= '0' && *p <= '9') {
+                ln = ln * 10 + (*p - '0'); p++;
+            }
+            ln--; // 1-based to 0-based
+            if (ln < 0) { ln = 0; }
+            if (ln >= vi_nl) { ln = vi_nl - 1; }
+            vi_cy = ln;
+            vi_cx = 0;
+            if (vi_cy < vi_top) { vi_top = vi_cy; }
+            if (vi_cy >= vi_top + vi_rows - 1) {
+                vi_top = vi_cy - vi_rows / 2;
+                if (vi_top < 0) { vi_top = 0; }
+            }
+        } else {
+            // :N,Ms/...  or :Ns/...
+            vi_ex_sub(cmd);
+        }
+    } else if (cmd[0] == '$') {
+        // :$ — jump to last line
+        vi_cy = vi_nl - 1;
+        vi_cx = 0;
+        vi_top = vi_cy - vi_rows / 2;
+        if (vi_top < 0) { vi_top = 0; }
+    } else if (cmd[0] == 's' || cmd[0] == '%') {
+        vi_ex_sub(cmd);
     } else {
         strcpy(vi_msg, "Unknown command");
     }
@@ -4707,7 +4878,7 @@ static void setup(void) {
     cmd_reg("kill", cmd_kill, "kill [-SIG] PID");
     cmd_reg("ps", cmd_ps, "ps");
     cmd_reg("sh", cmd_sh, "sh [-c CMD] [SCRIPT] PS1='\\w\\$ ' \\w \\W \\u \\h");
-    cmd_reg("vi", cmd_vi, "vi [FILE]");
+    cmd_reg("vi", cmd_vi, "vi [FILE] :N :%s/re/rep/[gi] :N,Ms///[gi]");
     cmd_reg("cx", cmd_cx, "cx FILE.c [ARGS...]");
     cmd_reg("help", cmd_help, "help");
     cmd_reg("exit", cmd_exit, "exit [CODE]");
