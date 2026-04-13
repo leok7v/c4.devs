@@ -103,7 +103,7 @@ int64_t cmdline_def_count = 0;
 // tokens and classes (operators last and in precedence order)
 enum {
     Num = 128, Fun, Sys, Glo, Loc, Id, Tdef,
-    Bool, Char, Const, Else, Enum, If, Inline, Int, Int32_t, Int64_t, Return,
+    Bool, Char, Const, Else, Enum, If, Inline, Int, Int32_t, Int64_t, Long, Return,
     Sizeof, Static, Struct, Typedef, Union, Void, While, For, Do, Switch, Case,
     Default, Break, Continue, Ellipsis,
     Comma, Assign, Cond, Lor,
@@ -156,7 +156,7 @@ void next(void) {
         ++p;
         if (tk == '\n') {
             if (src) {
-                printf("%d: %.*s", (int)line, (int)(p - lp), lp);
+                printf("%d: %.*s", (int32_t)line, (int32_t)(p - lp), lp);
                 lp = p;
                 while (le < e) {
                     opc = *++le;
@@ -183,7 +183,7 @@ void next(void) {
                              [(opc - I_OPEN) * 5]);
                     }
                     if (opc <= ADJ || opc == REVN) {
-                        printf(" %d\n", (int)*++le);
+                        printf(" %d\n", (int32_t)*++le);
                     } else {
                         printf("\n");
                     }
@@ -453,9 +453,9 @@ void next(void) {
 
 void fatal(char *s) {
     if (cur_file) {
-        printf("%s:%d: %s\n", (char *)cur_file, (int)line, s);
+        printf("%s:%d: %s\n", (char *)cur_file, (int32_t)line, s);
     } else {
-        printf("%d: %s\n", (int)line, s);
+        printf("%d: %s\n", (int32_t)line, s);
     }
     exit(-1);
 }
@@ -509,7 +509,7 @@ void print_fn_name(char *name) {
 
 // print stack trace from current bp
 void stacktrace(int64_t *bp_cur, int64_t *stack_top) {
-    int depth; int64_t ret; int64_t off;
+    int32_t depth; int64_t ret; int64_t off;
     int64_t fline; char *ffile; char *name; char *base;
     depth = 0;
     printf("stack trace:\n");
@@ -525,12 +525,12 @@ void stacktrace(int64_t *bp_cur, int64_t *stack_top) {
             print_fn_name(name);
             base = file_basename(ffile);
             if (base && fline > 0) {
-                printf(" (%s:%d)\n", base, (int)fline);
+                printf(" (%s:%d)\n", base, (int32_t)fline);
             } else {
-                printf("+%d\n", (int)off);
+                printf("+%d\n", (int32_t)off);
             }
         } else {
-            printf("  <+%d>\n", (int)ret);
+            printf("  <+%d>\n", (int32_t)ret);
         }
         bp_cur = (int64_t *)bp_cur[0];
         depth++;
@@ -744,7 +744,7 @@ void number(void) {
 
 void string_literal(void) {
     char *first, *ptrs[64], *result, *dst, *src;
-    int n, i;
+    int32_t n, i;
     first = (char *)ival;
     next();
     if (tk != '"') {
@@ -808,10 +808,10 @@ void size_of(void) {
         }
         ty = INT64;
     } else {
-        if (tk == Int || tk == Bool) {
-            next();
+        if (tk == Int || tk == Bool || tk == Long) {
+            next(); if (tk == Long) { next(); }
         } else if (tk == Int32_t) {
-            next(); 
+            next();
             ty = INT32;
         } else if (tk == Int64_t) {
             next(); 
@@ -845,7 +845,7 @@ void size_of(void) {
     expect('(', "open paren expected in sizeof");
     ty = INT64;
     skip_const();
-    if (tk == Int || tk == Bool) {
+    if (tk == Int || tk == Bool || tk == Long) {
         next();
     } else if (tk == Int32_t) {
         next(); ty = INT32;
@@ -1184,11 +1184,11 @@ void expression(int64_t lev) {
         case '(':
             next();
             skip_const();
-            if (tk == Int || tk == Bool || tk == Int32_t || tk == Int64_t ||
+            if (tk == Int || tk == Bool || tk == Long || tk == Int32_t || tk == Int64_t ||
                 tk == Char || tk == Struct || tk == Union ||
                 (tk == Id && id[Class] == Tdef)) {
                 t = INT64;
-                if (tk == Int || tk == Bool) { next();
+                if (tk == Int || tk == Bool || tk == Long) { next(); if (tk == Long) { next(); }
                 } else if (tk == Int32_t) { next(); t = INT32;
                 } else if (tk == Int64_t) { next(); t = INT64;
                 } else if (tk == Char) { next(); t = CHAR;
@@ -1530,11 +1530,11 @@ void statement(void) {
         int64_t for_scope_mark = scope_sp;
         skip_const();
         int64_t bt;
-        if (tk == Int || tk == Bool || tk == Int32_t || tk == Int64_t ||
+        if (tk == Int || tk == Bool || tk == Long || tk == Int32_t || tk == Int64_t ||
             tk == Char || tk == Struct || tk == Union ||
             (tk == Id && id[Class] == Tdef)) {
             bt = INT64;
-            if (tk == Int || tk == Bool) { next();
+            if (tk == Int || tk == Bool || tk == Long) { next(); if (tk == Long) { next(); }
             } else if (tk == Int32_t) { next(); bt = INT32;
             } else if (tk == Int64_t) { next(); bt = INT64;
             } else if (tk == Char) { next(); bt = CHAR;
@@ -1679,7 +1679,7 @@ void statement(void) {
         int64_t mark = scope_sp;
         skip_const();
         int64_t bt, sz;
-                while (tk == Int || tk == Bool || tk == Int32_t || tk == Int64_t ||
+                while (tk == Int || tk == Bool || tk == Long || tk == Int32_t || tk == Int64_t ||
                tk == Char || tk == Struct || tk == Union ||
                (tk == Id && id[Class] == Tdef)) {
                         if (tk == Struct || tk == Union) {
@@ -1696,8 +1696,8 @@ void statement(void) {
                 next();
             } else {
                 bt = INT64;
-                if (tk == Int || tk == Bool) {
-                    next();
+                if (tk == Int || tk == Bool || tk == Long) {
+                    next(); if (tk == Long) { next(); }
                 } else if (tk == Int32_t) {
                     next();
                     bt = INT32;
@@ -1835,7 +1835,7 @@ void statement(void) {
         cnt_sp = cnt_sp + 1;
     } else if (tk == ';') {
         next();
-    } else if (tk == Static || tk == Const || tk == Int || tk == Bool ||
+    } else if (tk == Static || tk == Const || tk == Int || tk == Bool || tk == Long ||
                tk == Int32_t || tk == Int64_t || tk == Char || tk == Struct ||
                tk == Union || (tk == Id && id[Class] == Tdef)) {
         // mid-block declaration (possibly static)
@@ -1853,7 +1853,7 @@ void statement(void) {
             next();
         } else {
             bt = INT64;
-            if (tk == Int || tk == Bool) { next();
+            if (tk == Int || tk == Bool || tk == Long) { next(); if (tk == Long) { next(); }
             } else if (tk == Int32_t) { next(); bt = INT32;
             } else if (tk == Int64_t) { next();
             } else if (tk == Char) { next(); bt = CHAR;
@@ -2105,7 +2105,7 @@ void statement(void) {
 
 char* mem_read(const char* filename) {
     char* return_ptr = 0;
-    int file_descriptor = open(filename, O_RDONLY);
+    int32_t file_descriptor = open(filename, O_RDONLY);
     if (file_descriptor != -1) {
         int64_t file_size = lseek(file_descriptor, 0, 2); // SEEK_END
         lseek(file_descriptor, 0, 0); // SEEK_SET
@@ -2133,7 +2133,7 @@ void mem_close(char* pointer_to_memread_file) {
         char* base_pointer = (char*)pointer_to_memread_file - 16;
         int64_t* metadata = (int64_t*)base_pointer;
         
-        int file_descriptor = (int)metadata[0];
+        int32_t file_descriptor = (int32_t)metadata[0];
         int64_t total_size = metadata[1];
         
         close(file_descriptor);
@@ -2147,10 +2147,10 @@ bool mem_write(const char* filename, const char* data, int64_t bytes) {
     strcpy(temporary_name, filename);
     strcat(temporary_name, ".tmp");
     
-    int file_descriptor = open(temporary_name, O_CREAT | O_RDWR | O_TRUNC, 0644);
+    int32_t file_descriptor = open(temporary_name, O_CREAT | O_RDWR | O_TRUNC, 0644);
     
     if (file_descriptor != -1) {
-        int truncate_result = ftruncate(file_descriptor, bytes);
+        int32_t truncate_result = ftruncate(file_descriptor, bytes);
         
         if (truncate_result != -1) {
             char* mapped_memory = (char*)mmap(0, bytes, PROT_READ | PROT_WRITE, MAP_SHARED, file_descriptor, 0);
@@ -2160,7 +2160,7 @@ bool mem_write(const char* filename, const char* data, int64_t bytes) {
                 msync(mapped_memory, bytes, MS_SYNC);
                 munmap(mapped_memory, bytes);
                 
-                int rename_result = rename(temporary_name, filename);
+                int32_t rename_result = rename(temporary_name, filename);
                 if (rename_result == 0) {
                     success_flag = true;
                 }
@@ -2174,15 +2174,15 @@ bool mem_write(const char* filename, const char* data, int64_t bytes) {
 }
 
 // preprocessor helpers
-int pp_streq(char *a, int alen, char *b, int blen) {
+int32_t pp_streq(char *a, int32_t alen, char *b, int32_t blen) {
     if (alen != blen) { return 0; }
-    int j = 0;
+    int32_t j = 0;
     while (j < alen) { if (a[j] != b[j]) { return 0; } j++; }
     return 1;
 }
 
-int pp_find(char *name, int len) {
-    int j = 0;
+int32_t pp_find(char *name, int32_t len) {
+    int32_t j = 0;
     while (j < pp_count) {
         if (pp_streq(name, len, pp_names[j], pp_nlen[j])) { return j; }
         j++;
@@ -2190,8 +2190,8 @@ int pp_find(char *name, int len) {
     return -1;
 }
 
-void pp_define(char *name, int nlen, char *val, int vlen, int pcount) {
-    int idx = pp_find(name, nlen);
+void pp_define(char *name, int32_t nlen, char *val, int32_t vlen, int32_t pcount) {
+    int32_t idx = pp_find(name, nlen);
     if (idx < 0) { idx = pp_count++; }
     pp_names[idx] = name;
     pp_nlen[idx] = nlen;
@@ -2200,8 +2200,8 @@ void pp_define(char *name, int nlen, char *val, int vlen, int pcount) {
     pp_pcount[idx] = pcount;
 }
 
-void pp_undef(char *name, int nlen) {
-    int idx = pp_find(name, nlen);
+void pp_undef(char *name, int32_t nlen) {
+    int32_t idx = pp_find(name, nlen);
     if (idx >= 0) {
         pp_count--;
         while (idx < pp_count) {
@@ -2214,37 +2214,37 @@ void pp_undef(char *name, int nlen) {
     }
 }
 
-int pp_is_ident_char(char c) {
+int32_t pp_is_ident_char(char c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
            (c >= '0' && c <= '9') || c == '_';
 }
 
-int pp_is_ident_start(char c) {
+int32_t pp_is_ident_start(char c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
 }
 
-int pp_skip_ws(char *s) {
-    int n = 0;
+int32_t pp_skip_ws(char *s) {
+    int32_t n = 0;
     while (s[n] == ' ' || s[n] == '\t') { n++; }
     return n;
 }
 
-int pp_get_ident(char *s, int *len) {
-    int n = pp_skip_ws(s);
+int32_t pp_get_ident(char *s, int32_t *len) {
+    int32_t n = pp_skip_ws(s);
     if (!pp_is_ident_start(s[n])) { *len = 0; return n; }
-    int start = n;
+    int32_t start = n;
     while (pp_is_ident_char(s[n])) { n++; }
     *len = n - start;
     return start;
 }
 
-int pp_active(void) {
+int32_t pp_active(void) {
     if (pp_cond_sp == 0) { return 1; }
     return pp_cond[pp_cond_sp - 1];
 }
 
-int pp_was_included(char *file) {
-    int j = 0;
+int32_t pp_was_included(char *file) {
+    int32_t j = 0;
     while (j < pp_once_count) {
         if (strcmp(pp_once[j], file) == 0) { return 1; }
         j++;
@@ -2252,29 +2252,29 @@ int pp_was_included(char *file) {
     return 0;
 }
 
-char *preprocess(char *src, int srclen, char *out, char *filename, int depth);
+char *preprocess(char *src, int32_t srclen, char *out, char *filename, int32_t depth);
 
-char *pp_include(char *out, char *file, int depth) {
+char *pp_include(char *out, char *file, int32_t depth) {
     if (depth > 16) {
         printf("pp: include depth exceeded\n");
         return 0;
     }
     if (pp_was_included(file)) { return out; }
-    int fd = open(file, 0);
+    int32_t fd = open(file, 0);
     if (fd < 0) {
         printf("pp: could not open %s\n", file);
         return 0;
     }
     // read in 64K chunks, grow as needed
-    int bufsz = 65536;
+    int32_t bufsz = 65536;
     char *buf = malloc(bufsz);
     if (!buf) { close(fd); return 0; }
-    int total = 0;
-    int n;
+    int32_t total = 0;
+    int32_t n;
     while ((n = read(fd, buf + total, bufsz - total - 1)) > 0) {
         total = total + n;
         if (total >= bufsz - 1024) {
-            int newsz = bufsz * 2;
+            int32_t newsz = bufsz * 2;
             char *newbuf = malloc(newsz);
             if (!newbuf) { free(buf); close(fd); return 0; }
             memcpy(newbuf, buf, total);
@@ -2291,21 +2291,21 @@ char *pp_include(char *out, char *file, int depth) {
     return result;
 }
 
-char *pp_embed(char *out, char *file, int add_null) {
-    int fd = open(file, 0);
+char *pp_embed(char *out, char *file, int32_t add_null) {
+    int32_t fd = open(file, 0);
     if (fd < 0) {
         printf("pp: could not embed %s\n", file);
         return 0;
     }
-    int bufsz = 65536;
+    int32_t bufsz = 65536;
     char *buf = malloc(bufsz);
     if (!buf) { close(fd); return 0; }
-    int total = 0;
-    int n;
+    int32_t total = 0;
+    int32_t n;
     while ((n = read(fd, buf + total, bufsz - total - 1)) > 0) {
         total = total + n;
         if (total >= bufsz - 1024) {
-            int newsz = bufsz * 2;
+            int32_t newsz = bufsz * 2;
             char *newbuf = malloc(newsz);
             if (!newbuf) { free(buf); close(fd); return 0; }
             memcpy(newbuf, buf, total);
@@ -2316,9 +2316,9 @@ char *pp_embed(char *out, char *file, int add_null) {
     }
     close(fd);
     if (total < 0) { free(buf); return 0; }
-    int j = 0;
+    int32_t j = 0;
     while (j < total) {
-        int v = buf[j] & 0xFF;
+        int32_t v = buf[j] & 0xFF;
         if (j > 0) { *out++ = ','; *out++ = ' '; }
         if (v >= 100) { *out++ = '0' + (v / 100); }
         if (v >= 10) { *out++ = '0' + ((v / 10) % 10); }
@@ -2333,7 +2333,7 @@ char *pp_embed(char *out, char *file, int add_null) {
     return out;
 }
 
-char *preprocess(char *src, int srclen, char *out, char *filename, int depth) {
+char *preprocess(char *src, int32_t srclen, char *out, char *filename, int32_t depth) {
     // strip /* */ block comments in-place, preserving newlines
     char *r = src;
     char *w = src;
@@ -2362,8 +2362,8 @@ char *preprocess(char *src, int srclen, char *out, char *filename, int depth) {
     *w = 0;
     char *s = src;
     char *end = src + srclen;
-    int pp_line_local = 1;
-    int pragma_once = 0; (void)pragma_once;
+    int32_t pp_line_local = 1;
+    int32_t pragma_once = 0; (void)pragma_once;
     // emit initial #line
     char *o = out;
     *o++ = '#'; *o++ = 'l'; *o++ = 'i'; *o++ = 'n'; *o++ = 'e';
@@ -2376,24 +2376,24 @@ char *preprocess(char *src, int srclen, char *out, char *filename, int depth) {
         // find end of line
         char *eol = s;
         while (eol < end && *eol != '\n') { eol++; }
-        int linelen = eol - s;
+        int32_t linelen = eol - s;
         // skip leading whitespace
-        int ws = pp_skip_ws(s);
+        int32_t ws = pp_skip_ws(s);
         if (s[ws] == '#') {
             // directive
-            int pos = ws + 1;
+            int32_t pos = ws + 1;
             pos = pos + pp_skip_ws(s + pos);
             // parse directive name
-            int dlen;
-            int dstart = pos + pp_get_ident(s + pos, &dlen);
+            int32_t dlen;
+            int32_t dstart = pos + pp_get_ident(s + pos, &dlen);
             pos = dstart + dlen;
             if (pp_streq(s + dstart, dlen, "define", 6) && pp_active()) {
                 pos = pos + pp_skip_ws(s + pos);
-                int nlen;
-                int nstart = pos + pp_get_ident(s + pos, &nlen);
+                int32_t nlen;
+                int32_t nstart = pos + pp_get_ident(s + pos, &nlen);
                 pos = nstart + nlen;
-                int pcount = -1; // -1 = object-like macro
-                int macro_idx = pp_find(s + nstart, nlen);
+                int32_t pcount = -1; // -1 = object-like macro
+                int32_t macro_idx = pp_find(s + nstart, nlen);
                 if (macro_idx < 0) { macro_idx = pp_count; }
                 if (s[pos] == '(') {
                     // function-like macro
@@ -2402,11 +2402,11 @@ char *preprocess(char *src, int srclen, char *out, char *filename, int depth) {
                     while (s[pos] != ')' && pos < linelen) {
                         pos = pos + pp_skip_ws(s + pos);
                         if (s[pos] == ')') { break; }
-                        int plen;
-                        int pstart = pos + pp_get_ident(s + pos, &plen);
+                        int32_t plen;
+                        int32_t pstart = pos + pp_get_ident(s + pos, &plen);
                         if (plen > 0 && plen < 16 && pcount < 8) {
-                            int pi = 0;
-                            int pbase = macro_idx * 128 + pcount * 16;
+                            int32_t pi = 0;
+                            int32_t pbase = macro_idx * 128 + pcount * 16;
                             while (pi < plen) {
                                 pp_params[pbase + pi] = s[pstart + pi];
                                 pi++;
@@ -2421,62 +2421,62 @@ char *preprocess(char *src, int srclen, char *out, char *filename, int depth) {
                     if (s[pos] == ')') { pos++; }
                 }
                 pos = pos + pp_skip_ws(s + pos);
-                int vstart = pos;
-                int vlen = linelen - vstart;
+                int32_t vstart = pos;
+                int32_t vlen = linelen - vstart;
                 while (vlen > 0 && (s[vstart + vlen - 1] == ' ' ||
                        s[vstart + vlen - 1] == '\t' ||
                        s[vstart + vlen - 1] == '\r')) { vlen--; }
                 pp_define(s + nstart, nlen, s + vstart, vlen, pcount);
             } else if (pp_streq(s + dstart, dlen, "undef", 5) && pp_active()) {
                 pos = pos + pp_skip_ws(s + pos);
-                int nlen;
-                int nstart = pos + pp_get_ident(s + pos, &nlen);
+                int32_t nlen;
+                int32_t nstart = pos + pp_get_ident(s + pos, &nlen);
                 pp_undef(s + nstart, nlen);
             } else if (pp_streq(s + dstart, dlen, "ifdef", 5)) {
                 pos = pos + pp_skip_ws(s + pos);
-                int nlen;
-                int nstart = pos + pp_get_ident(s + pos, &nlen);
-                int defined = pp_find(s + nstart, nlen) >= 0;
-                int parent_active = pp_active();
+                int32_t nlen;
+                int32_t nstart = pos + pp_get_ident(s + pos, &nlen);
+                int32_t defined = pp_find(s + nstart, nlen) >= 0;
+                int32_t parent_active = pp_active();
                 pp_cond[pp_cond_sp++] = parent_active && defined;
             } else if (pp_streq(s + dstart, dlen, "ifndef", 6)) {
                 pos = pos + pp_skip_ws(s + pos);
-                int nlen;
-                int nstart = pos + pp_get_ident(s + pos, &nlen);
-                int defined = pp_find(s + nstart, nlen) >= 0;
-                int parent_active = pp_active();
+                int32_t nlen;
+                int32_t nstart = pos + pp_get_ident(s + pos, &nlen);
+                int32_t defined = pp_find(s + nstart, nlen) >= 0;
+                int32_t parent_active = pp_active();
                 pp_cond[pp_cond_sp++] = parent_active && !defined;
             } else if (pp_streq(s + dstart, dlen, "if", 2)) {
                 pos = pos + pp_skip_ws(s + pos);
-                int cond_result = 0;
+                int32_t cond_result = 0;
                 if (s[pos] == '0') {
                     cond_result = 0;
                 } else if (s[pos] == '1') {
                     cond_result = 1;
                 }
-                int parent_active = pp_active();
+                int32_t parent_active = pp_active();
                 pp_cond[pp_cond_sp++] = parent_active && cond_result;
             } else if (pp_streq(s + dstart, dlen, "else", 4)) {
                 if (pp_cond_sp > 0) {
-                    int parent = pp_cond_sp > 1 ? pp_cond[pp_cond_sp - 2] : 1;
+                    int32_t parent = pp_cond_sp > 1 ? pp_cond[pp_cond_sp - 2] : 1;
                     pp_cond[pp_cond_sp - 1] = parent && !pp_cond[pp_cond_sp - 1];
                 }
             } else if (pp_streq(s + dstart, dlen, "elif", 4)) {
                 if (pp_cond_sp > 0 && !pp_cond[pp_cond_sp - 1]) {
                     pos = pos + pp_skip_ws(s + pos);
-                    int cond_result = 0;
+                    int32_t cond_result = 0;
                     if (s[pos] == '1') {
                         cond_result = 1;
                     }
-                    int parent = pp_cond_sp > 1 ? pp_cond[pp_cond_sp - 2] : 1;
+                    int32_t parent = pp_cond_sp > 1 ? pp_cond[pp_cond_sp - 2] : 1;
                     pp_cond[pp_cond_sp - 1] = parent && cond_result;
                 }
             } else if (pp_streq(s + dstart, dlen, "endif", 5)) {
                 if (pp_cond_sp > 0) { pp_cond_sp--; }
             } else if (pp_streq(s + dstart, dlen, "pragma", 6) && pp_active()) {
                 pos = pos + pp_skip_ws(s + pos);
-                int plen;
-                int pstart = pos + pp_get_ident(s + pos, &plen);
+                int32_t plen;
+                int32_t pstart = pos + pp_get_ident(s + pos, &plen);
                 if (pp_streq(s + pstart, plen, "once", 4)) {
                     pragma_once = 1;
                     if (pp_once_count < 256) {
@@ -2488,10 +2488,10 @@ char *preprocess(char *src, int srclen, char *out, char *filename, int depth) {
                 char delim = s[pos];
                 if (delim == '"' || delim == '<') {
                     char enddelim = (delim == '<') ? '>' : '"';
-                    int fstart = pos + 1;
-                    int fend = fstart;
+                    int32_t fstart = pos + 1;
+                    int32_t fend = fstart;
                     while (fend < linelen && s[fend] != enddelim) { fend++; }
-                    int flen = fend - fstart;
+                    int32_t flen = fend - fstart;
                     char fnamebuf[256];
                     if (flen < 256) {
                         memcpy(fnamebuf, s + fstart, flen);
@@ -2505,7 +2505,7 @@ char *preprocess(char *src, int srclen, char *out, char *filename, int depth) {
                             // emit #line to restore position
                             *o++ = '#'; *o++ = 'l'; *o++ = 'i'; *o++ = 'n';
                             *o++ = 'e'; *o++ = ' ';
-                            int ln = pp_line_local + 1;
+                            int32_t ln = pp_line_local + 1;
                             if (ln >= 10000) { *o++ = '0' + (ln / 10000) % 10; }
                             if (ln >= 1000) { *o++ = '0' + (ln / 1000) % 10; }
                             if (ln >= 100) { *o++ = '0' + (ln / 100) % 10; }
@@ -2521,17 +2521,17 @@ char *preprocess(char *src, int srclen, char *out, char *filename, int depth) {
             } else if (pp_streq(s + dstart, dlen, "embed", 5) && pp_active()) {
                 pos = pos + pp_skip_ws(s + pos);
                 if (s[pos] == '"') {
-                    int fstart = pos + 1;
-                    int fend = fstart;
+                    int32_t fstart = pos + 1;
+                    int32_t fend = fstart;
                     while (fend < linelen && s[fend] != '"') { fend++; }
-                    int flen = fend - fstart;
+                    int32_t flen = fend - fstart;
                     char fnamebuf[256];
                     if (flen < 256) {
                         memcpy(fnamebuf, s + fstart, flen);
                         fnamebuf[flen] = 0;
                         // check for trailing , 0 for null terminator
-                        int add_null = 0;
-                        int after = fend + 1;
+                        int32_t add_null = 0;
+                        int32_t after = fend + 1;
                         after = after + pp_skip_ws(s + after);
                         if (s[after] == ',') {
                             after++;
@@ -2556,15 +2556,15 @@ char *preprocess(char *src, int srclen, char *out, char *filename, int depth) {
                 if (pp_is_ident_start(*c)) {
                     char *istart = c;
                     while (c < eol && pp_is_ident_char(*c)) { c++; }
-                    int ilen = c - istart;
-                    int idx = pp_find(istart, ilen);
+                    int32_t ilen = c - istart;
+                    int32_t idx = pp_find(istart, ilen);
                     if (idx >= 0 && pp_pcount[idx] >= 0 && *c == '(') {
                         // function-like macro - parse arguments
                         c++; // skip '('
                         char *args[8];
-                        int arglens[8];
-                        int argc = 0;
-                        int depth = 1;
+                        int32_t arglens[8];
+                        int32_t argc = 0;
+                        int32_t depth = 1;
                         char *astart = c;
                         while (c < eol && depth > 0) {
                             if (*c == '(') { depth++;
@@ -2589,22 +2589,22 @@ char *preprocess(char *src, int srclen, char *out, char *filename, int depth) {
                         }
                         // substitute body with args replacing params
                         char *body = pp_values[idx];
-                        int blen = pp_vlen[idx];
-                        int bi = 0;
+                        int32_t blen = pp_vlen[idx];
+                        int32_t bi = 0;
                         while (bi < blen) {
                             if (pp_is_ident_start(body[bi])) {
-                                int bstart = bi;
+                                int32_t bstart = bi;
                                 while (bi < blen && pp_is_ident_char(body[bi])) { bi++; }
-                                int bilen = bi - bstart;
-                                int pi = 0;
-                                int found = -1;
+                                int32_t bilen = bi - bstart;
+                                int32_t pi = 0;
+                                int32_t found = -1;
                                 while (pi < pp_pcount[idx]) {
-                                    int pbase = idx * 128 + pi * 16;
-                                    int plen = 0;
+                                    int32_t pbase = idx * 128 + pi * 16;
+                                    int32_t plen = 0;
                                     while (pp_params[pbase + plen]) { plen++; }
                                     if (bilen == plen) {
-                                        int match = 1;
-                                        int k = 0;
+                                        int32_t match = 1;
+                                        int32_t k = 0;
                                         while (k < bilen) {
                                             if (body[bstart + k] != pp_params[pbase + k]) {
                                                 match = 0;
@@ -2616,12 +2616,12 @@ char *preprocess(char *src, int srclen, char *out, char *filename, int depth) {
                                     pi++;
                                 }
                                 if (found >= 0 && found < argc) {
-                                    int ai = 0;
+                                    int32_t ai = 0;
                                     while (ai < arglens[found]) {
                                         *o++ = args[found][ai++];
                                     }
                                 } else {
-                                    int k = bstart;
+                                    int32_t k = bstart;
                                     while (k < bi) { *o++ = body[k++]; }
                                 }
                             } else {
@@ -2630,7 +2630,7 @@ char *preprocess(char *src, int srclen, char *out, char *filename, int depth) {
                         }
                     } else if (idx >= 0 && pp_pcount[idx] < 0 && pp_vlen[idx] > 0) {
                         // object-like macro
-                        int j = 0;
+                        int32_t j = 0;
                         while (j < pp_vlen[idx]) { *o++ = pp_values[idx][j++]; }
                     } else {
                         // copy identifier as-is
@@ -2720,11 +2720,11 @@ int64_t *compile(char *filename) {
     sym = sym_pool;
     le = code_base = e = code_pool;
     if (!(data = data_base = malloc(poolsz * 8))) {
-        printf("could not malloc(%d) data area\n", (int)(poolsz * 8));
+        printf("could not malloc(%d) data area\n", (int32_t)(poolsz * 8));
         return 0;
     }
     if (!(src_pool = malloc(srcbufsz))) {
-        printf("could not malloc(%d) src_pool area\n", (int)srcbufsz);
+        printf("could not malloc(%d) src_pool area\n", (int32_t)srcbufsz);
         return 0;
     }
     struct_syms = struct_syms_arr;
@@ -2733,7 +2733,7 @@ int64_t *compile(char *filename) {
     memset(data, 0, poolsz * 8);
     memset(struct_syms, 0, 256 * sizeof(int64_t));
     // keywords
-    p = "bool char const else enum if inline int int32_t int64_t return sizeof "
+    p = "bool char const else enum if inline int int32_t int64_t long return sizeof "
         "static struct typedef union void while for do switch case default "
         "break continue "
         "void true false main";
@@ -2754,7 +2754,7 @@ int64_t *compile(char *filename) {
     }
     i = read(fd, raw_src, srcbufsz - 1);
     if (i <= 0) {
-        printf("read() returned %d\n", (int)i);
+        printf("read() returned %d\n", (int32_t)i);
         return 0;
     }
     raw_src[i] = 0;
@@ -2764,7 +2764,7 @@ int64_t *compile(char *filename) {
     if (i >= 2 && raw_src[0] == '#' && raw_src[1] == '!') {
         while (*src_start && *src_start != '\n') src_start++;
         if (*src_start == '\n') src_start++;
-        i -= (int)(src_start - raw_src);
+        i -= (int32_t)(src_start - raw_src);
     }
     // preprocess
     pp_count = 0;
@@ -2781,14 +2781,14 @@ int64_t *compile(char *filename) {
     pp_define("_WIN32", 6, "1", 1, -1);
 #endif
     // process -D command line defines
-    int di = 0;
+    int32_t di = 0;
     while (di < cmdline_def_count) {
         char *def = cmdline_defs[di];
         char *eq = def;
         while (*eq && *eq != '=') { eq++; }
-        int nlen = eq - def;
+        int32_t nlen = eq - def;
         if (*eq == '=') {
-            int vlen = 0;
+            int32_t vlen = 0;
             char *v = eq + 1;
             while (v[vlen]) { vlen++; }
             pp_define(def, nlen, v, vlen, -1);
@@ -2811,8 +2811,8 @@ int64_t *compile(char *filename) {
     while (tk) {
         while (tk == Const || tk == Static || tk == Inline) { next(); }
         bt = INT64; // basetype
-        if (tk == Int || tk == Bool) {
-            next();
+        if (tk == Int || tk == Bool || tk == Long) {
+            next(); if (tk == Long) { next(); }
         } else if (tk == Int32_t) {
             next();
             bt = INT32;
@@ -2873,7 +2873,7 @@ int64_t *compile(char *filename) {
                 while (tk != '}') {
                     skip_const();
                     bt = INT64;
-                    if (tk == Int || tk == Bool) { next();
+                    if (tk == Int || tk == Bool || tk == Long) { next(); if (tk == Long) { next(); }
                     } else if (tk == Int32_t) { next(); bt = INT32;
                     } else if (tk == Int64_t) { next(); bt = INT64;
                     } else if (tk == Char) { next(); bt = CHAR;
@@ -2939,7 +2939,7 @@ int64_t *compile(char *filename) {
             next();
             skip_const();
             bt = INT64;
-            if (tk == Int || tk == Bool) { next();
+            if (tk == Int || tk == Bool || tk == Long) { next(); if (tk == Long) { next(); }
             } else if (tk == Int32_t) { next(); bt = INT32;
             } else if (tk == Int64_t) { next();
             } else if (tk == Char) { next(); bt = CHAR;
@@ -2994,8 +2994,8 @@ int64_t *compile(char *filename) {
                     if (tk == Ellipsis) { next(); break; }
                     skip_const();
                     ty = INT64;
-                    if (tk == Int || tk == Bool) {
-                        next();
+                    if (tk == Int || tk == Bool || tk == Long) {
+                        next(); if (tk == Long) { next(); }
                     } else if (tk == Int32_t) {
                         next();
                         ty = INT32;
@@ -3142,7 +3142,7 @@ int64_t *compile(char *filename) {
                 }
                 int64_t fn_scope_mark = scope_sp;
                 skip_const();
-                while (tk == Int || tk == Bool || tk == Int32_t ||
+                while (tk == Int || tk == Bool || tk == Long || tk == Int32_t ||
                        tk == Int64_t || tk == Char || tk == Struct ||
                        tk == Union || (tk == Id && id[Class] == Tdef)) {
                     if (tk == Struct || tk == Union) {
@@ -3159,8 +3159,8 @@ int64_t *compile(char *filename) {
                         next();
                     } else {
                         bt = INT64;
-                        if (tk == Int || tk == Bool) {
-                            next();
+                        if (tk == Int || tk == Bool || tk == Long) {
+                            next(); if (tk == Long) { next(); }
                         } else if (tk == Int32_t) {
                             next();
                             bt = INT32;
@@ -3451,7 +3451,7 @@ int64_t *compile(char *filename) {
         d = (int64_t *)fwd_patches[j];
         if (!d[Val]) {
             printf("unresolved forward declaration: %.*s\n", 
-                   (int)(d[Hash] & 0x3F), (char *)d[Name]);
+                   (int32_t)(d[Hash] & 0x3F), (char *)d[Name]);
             return 0;
         }
         j = j + 2;
@@ -3615,14 +3615,14 @@ static int64_t rt_vsnprintf(char *str, int64_t size, const char *fmt,
 
 #ifndef __cx__
 static struct termios termraw_orig;
-static int termraw_saved;
+static int32_t termraw_saved;
 static void termraw_atexit(void) {
     if (termraw_saved) tcsetattr(0, TCSAFLUSH, &termraw_orig);
 }
-static void sigwinch_handler(int sig) { (void)sig; }
+static void sigwinch_handler(int32_t sig) { (void)sig; }
 #endif
 
-int run(int64_t *pc_offset, int argc, char **argv) {
+int32_t run(int64_t *pc_offset, int32_t argc, char **argv) {
     int64_t *sp, *bp, *t, *pc, a, cycle;
     pc = (int64_t *)((char *)code_base + (int64_t)pc_offset);
     sp = (int64_t *)((int64_t)stack_pool + poolsz);
@@ -3641,7 +3641,7 @@ int run(int64_t *pc_offset, int argc, char **argv) {
         ++cycle;
         if (debug) {
             if (i < I_OPEN) {
-                printf("%d> %.4s", (int)cycle,
+                printf("%d> %.4s", (int32_t)cycle,
                     &"LEA ,IMM ,IMMD,IMMC,JMP ,JSR ,BZ  ,BNZ ,ENT ,ADJ ,"
                      "LEV ,LI  ,LC  ,LI32,SI  ,SC  ,SI32,PSH ,"
                      "OR  ,XOR ,AND ,EQ  ,NE  ,LT  ,GT  ,LE  ,"
@@ -3649,7 +3649,7 @@ int run(int64_t *pc_offset, int argc, char **argv) {
                      "DUP ,SPGT,SWAP,JSRI,MCPY,EXIT,PEEK,OFFS,COFF,"
                      "REVN,"[i * 5]);
             } else {
-                printf("%d> %.4s", (int)cycle,
+                printf("%d> %.4s", (int32_t)cycle,
                     &"OPEN,READ,CLOS,PRTF,MALC,FREE,MSET,MCMP,"
                      "IEXT,WRIT,SYST,POPN,PCLS,FRED,IMCP,MMOV,"
                      "SCPY,SCMP,SLEN,SCAT,SNCM,ASRT,ALCA,MRED,"
@@ -3661,7 +3661,7 @@ int run(int64_t *pc_offset, int argc, char **argv) {
                      [(i - I_OPEN) * 5]);
             }
             if (i <= ADJ || i == REVN) {
-                printf(" %d\n", (int)*pc);
+                printf(" %d\n", (int32_t)*pc);
             } else {
                 printf("\n");
             }
@@ -3731,7 +3731,7 @@ int run(int64_t *pc_offset, int argc, char **argv) {
             case EXIT:
                 if (debug) {
                     printf("exit(%d) cycle = %d\n",
-                           (int)*sp, (int)cycle);
+                           (int32_t)*sp, (int32_t)cycle);
                 }
                 return *sp;
         // intrinsics
@@ -3752,7 +3752,7 @@ int run(int64_t *pc_offset, int argc, char **argv) {
             case I_EXIT:
             if (debug) {
                 printf("exit(%d) cycle = %d\n",
-                       (int)*sp, (int)cycle);
+                       (int32_t)*sp, (int32_t)cycle);
             }
             return *sp;
             case I_WRIT: a = write(sp[2], (char *)sp[1], *sp); break;
@@ -3781,7 +3781,7 @@ int run(int64_t *pc_offset, int argc, char **argv) {
                         if (afn) {
                             char *ab; ab = file_basename(af);
                             if (ab) { printf("%s:", ab); }
-                            if (aln > 0) { printf("%d: ", (int)aln); }
+                            if (aln > 0) { printf("%d: ", (int32_t)aln); }
                             printf("assert failed in ");
                             print_fn_name(afn);
                             printf("\n");
@@ -3808,14 +3808,14 @@ int run(int64_t *pc_offset, int argc, char **argv) {
             case I_ISSPC: a = isspace(*sp & 0xFF); break;
             case I_ISALP: a = isalpha(*sp & 0xFF); break;
             case I_TOLOW: a = tolower(*sp & 0xFF); break;
-            case I_SCHR: a = (int64_t)strchr((char*)sp[1], (int)*sp); break;
-            case I_SRCHR: a = (int64_t)strrchr((char*)sp[1], (int)*sp); break;
+            case I_SCHR: a = (int64_t)strchr((char*)sp[1], (int32_t)*sp); break;
+            case I_SRCHR: a = (int64_t)strrchr((char*)sp[1], (int32_t)*sp); break;
             case I_SSTR: a = (int64_t)strstr((char*)sp[1], (char*)*sp); break;
             case I_ATOI: a = atoi((char*)*sp); break;
 #ifndef __cx__
             case I_STAT: {
                 struct stat ns;
-                int sr = stat((const char*)sp[1], &ns);
+                int32_t sr = stat((const char*)sp[1], &ns);
                 if (sr == 0) {
                     int64_t* out = (int64_t*)sp[0];
                     out[0] = (int64_t)ns.st_mode;
@@ -3846,19 +3846,19 @@ int run(int64_t *pc_offset, int argc, char **argv) {
             case I_CLDIR: a = closedir((char*)*sp); break;
 #endif
             case I_UNLNK: a = unlink((char*)*sp); break;
-            case I_MKDIR: a = mkdir((char*)sp[1], (int)*sp); break;
+            case I_MKDIR: a = mkdir((char*)sp[1], (int32_t)*sp); break;
             case I_RMDIR: a = rmdir((char*)*sp); break;
             case I_GETCWD: a = (int64_t)getcwd((char*)sp[1], *sp); break;
             case I_CHDIR: a = chdir((char*)*sp); break;
             case I_GETENV: a = (int64_t)getenv((char*)*sp); break;
-            case I_ACCESS: a = access((char*)sp[1], (int)*sp); break;
-            case I_CHMOD: a = chmod((char*)sp[1], (int)*sp); break;
+            case I_ACCESS: a = access((char*)sp[1], (int32_t)*sp); break;
+            case I_CHMOD: a = chmod((char*)sp[1], (int32_t)*sp); break;
             case I_LINK: a = link((char*)sp[1], (char*)*sp); break;
             case I_SYMLNK: a = symlink((char*)sp[1], (char*)*sp); break;
-            case I_DUP2: a = dup2((int)sp[1], (int)*sp); break;
+            case I_DUP2: a = dup2((int32_t)sp[1], (int32_t)*sp); break;
             case I_PIPE: {
-                int nfds[2];
-                int pr = pipe(nfds);
+                int32_t nfds[2];
+                int32_t pr = pipe(nfds);
                 if (pr == 0) {
                     int64_t* out = (int64_t*)*sp;
                     out[0] = (int64_t)nfds[0];
@@ -3868,14 +3868,14 @@ int run(int64_t *pc_offset, int argc, char **argv) {
                 break;
             }
             case I_TIME: a = (int64_t)time(0); break;
-            case I_SLEEP: a = sleep((int)*sp); break;
-            case I_KILL: a = kill((int)sp[1], (int)*sp); break;
+            case I_SLEEP: a = sleep((int32_t)*sp); break;
+            case I_KILL: a = kill((int32_t)sp[1], (int32_t)*sp); break;
             case I_REALLOC: a = (int64_t)realloc((void *)sp[1], *sp); break;
-            case I_ISATTY: a = isatty((int)*sp); break;
+            case I_ISATTY: a = isatty((int32_t)*sp); break;
 #ifndef __cx__
             case I_TERMRAW: {
-                int fd = (int)sp[1];
-                int enable = (int)*sp;
+                int32_t fd = (int32_t)sp[1];
+                int32_t enable = (int32_t)*sp;
                 if (enable) {
                     if (!termraw_saved) {
                         tcgetattr(fd, &termraw_orig);
@@ -3903,7 +3903,7 @@ int run(int64_t *pc_offset, int argc, char **argv) {
             }
             case I_WINSZ: {
                 struct winsize ws;
-                int r = ioctl((int)sp[1], TIOCGWINSZ, &ws);
+                int32_t r = ioctl((int32_t)sp[1], TIOCGWINSZ, &ws);
                 if (r == 0) {
                     int64_t *out = (int64_t*)*sp;
                     out[0] = (int64_t)ws.ws_row;
@@ -3913,8 +3913,8 @@ int run(int64_t *pc_offset, int argc, char **argv) {
                 break;
             }
 #else
-            case I_TERMRAW: a = termraw((int)sp[1], (int)*sp); break;
-            case I_WINSZ: a = winsize((int)sp[1], (char*)*sp); break;
+            case I_TERMRAW: a = termraw((int32_t)sp[1], (int32_t)*sp); break;
+            case I_WINSZ: a = winsize((int32_t)sp[1], (char*)*sp); break;
 #endif
             case I_VSTRT: a = *sp + 8; break;
             case I_VEND:  break;
@@ -3947,7 +3947,7 @@ int run(int64_t *pc_offset, int argc, char **argv) {
 #endif
             default:
                 printf("unknown instruction = %d! cycle = %d\n",
-                    (int)i, (int)cycle);
+                    (int32_t)i, (int32_t)cycle);
                 return -1;
         }
     }

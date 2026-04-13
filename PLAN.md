@@ -1016,7 +1016,10 @@ between platforms and cx code should not care.
         names via sym_pool. __FILE__ and __LINE__ are lexer builtins.
         tests/assertions.c covers pass-through, expressions, __LINE__
         advancement, __FILE__ string, and subprocess assert(0) failure.
-    [ ] Stage 11 — cx.c: float, double, unsigned, long long
+    [~] Stage 11 — cx.c: float, double, unsigned, long long
+        `long long` parser sugar done (two-token specifier → INT64).
+        All bare `int` in cx.c and toys.c converted to int32_t/int64_t
+        (except `int main` and keyword registration string).
     [ ] Stage 12 — sh: $((expr)) arithmetic expansion (needs Stage 11)
 
 ---

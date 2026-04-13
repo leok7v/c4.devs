@@ -12,5 +12,9 @@ CLAUDE.local.md
 # filesystems (macOS).
 /TASK.md
 /RESPONSE.md
+# Claude auto-memory (user-specific, machine-local)
+.claude/projects/
+# Debug scratch files
+script.lldb
 # Local borrowing materials
 local/
