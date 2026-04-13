@@ -3260,7 +3260,25 @@ static int sh_exec_segment(int start, int end) {
             if (fn) {
                 rc = fn(actual_argc, actual_argv);
             } else {
-                rc = sh_run_external(actual_argc, actual_argv);
+                // heuristic: if command ends in .c, run through cx
+                char * cmd0 = actual_argv[0];
+                int clen = strlen(cmd0);
+                if (clen > 2 && cmd0[clen - 2] == '.' &&
+                    cmd0[clen - 1] == 'c' &&
+                    access(cmd0, 4) == 0 && cx_path[0]) {
+                    // build: cx_path file.c args...
+                    char * cx_argv[64];
+                    cx_argv[0] = cx_path;
+                    int ca = 0;
+                    while (ca < actual_argc && ca < 62) {
+                        cx_argv[ca + 1] = actual_argv[ca];
+                        ca++;
+                    }
+                    cx_argv[ca + 1] = 0;
+                    rc = sh_run_external(ca + 1, cx_argv);
+                } else {
+                    rc = sh_run_external(actual_argc, actual_argv);
+                }
             }
         }
     }
@@ -3709,22 +3727,28 @@ static int sh_readline(char * buf, int size, char * prompt) {
             int ws = pos;
             while (ws > 0 && buf[ws - 1] != ' ') { ws--; }
             int wlen = pos - ws;
-            if (wlen > 0) {
-                char prefix[256];
-                if (wlen > 255) { wlen = 255; }
-                memcpy(prefix, buf + ws, wlen);
-                prefix[wlen] = 0;
-                // collect matches from registered commands
-                char matches[2048]; // packed: name\0name\0...
-                int moff = 0;
-                int mcount = 0;
-                char * last_match = 0;
+            // is this the first word? (no non-space before ws)
+            int is_first = 1;
+            { int k = 0; while (k < ws) {
+                if (buf[k] != ' ') { is_first = 0; } k++;
+            } }
+            char * matches = (char*)malloc(8192);
+            int moff = 0;
+            int mcount = 0;
+            char * last_match = 0;
+            char prefix[256];
+            if (wlen > 255) { wlen = 255; }
+            memcpy(prefix, buf + ws, wlen);
+            prefix[wlen] = 0;
+            if (is_first) {
+                // command name completion
                 int ci = 0;
                 while (ci < ncmds) {
                     if (strncmp(cmds[ci].name, prefix, wlen) == 0) {
                         int nlen = strlen(cmds[ci].name);
-                        if (moff + nlen + 1 < 2048) {
-                            memcpy(matches + moff, cmds[ci].name, nlen + 1);
+                        if (moff + nlen + 1 < 8192) {
+                            memcpy(matches + moff, cmds[ci].name,
+                                   nlen + 1);
                             last_match = matches + moff;
                             moff = moff + nlen + 1;
                             mcount++;
@@ -3732,36 +3756,99 @@ static int sh_readline(char * buf, int size, char * prompt) {
                     }
                     ci++;
                 }
-                if (mcount == 1) {
-                    // single match — complete it
-                    int nlen = strlen(last_match);
-                    int add = nlen - wlen;
-                    if (len + add + 1 < size) {
-                        memmove(buf + pos + add + 1,
-                                buf + pos, len - pos);
-                        memcpy(buf + pos, last_match + wlen, add);
-                        buf[pos + add] = ' ';
-                        len = len + add + 1;
-                        pos = pos + add + 1;
-                        buf[len] = 0;
-                        rl_redraw(prompt, plen, buf, len, pos);
+            } else {
+                // filename completion — split prefix into dir + base
+                char dir[256];
+                char base[256];
+                int last_slash = -1;
+                { int k = 0; while (k < wlen) {
+                    if (prefix[k] == '/') { last_slash = k; } k++;
+                } }
+                if (last_slash >= 0) {
+                    memcpy(dir, prefix, last_slash + 1);
+                    dir[last_slash + 1] = 0;
+                    strcpy(base, prefix + last_slash + 1);
+                } else {
+                    strcpy(dir, ".");
+                    strcpy(base, prefix);
+                }
+                int blen = strlen(base);
+                void * dp = opendir(dir);
+                if (dp) {
+                    char * ent = (char*)readdir(dp);
+                    while (ent) {
+                        if (ent[0] != '.' || (blen > 0 && base[0] == '.')) {
+                            if (strncmp(ent, base, blen) == 0) {
+                                // build full match: dir/name or just name
+                                char full[512];
+                                int fl = 0;
+                                if (last_slash >= 0) {
+                                    memcpy(full, dir, strlen(dir));
+                                    fl = strlen(dir);
+                                }
+                                int el = strlen(ent);
+                                memcpy(full + fl, ent, el + 1);
+                                fl = fl + el;
+                                // append / if directory
+                                char spath[512];
+                                if (last_slash >= 0) {
+                                    strcpy(spath, full);
+                                } else {
+                                    strcpy(spath, dir);
+                                    strcat(spath, "/");
+                                    strcat(spath, ent);
+                                }
+                                struct cx_stat fst;
+                                if (stat(spath, (void*)&fst) == 0 &&
+                                    (fst.mode & 0040000)) {
+                                    full[fl] = '/'; fl++;
+                                    full[fl] = 0;
+                                }
+                                if (moff + fl + 1 < 8192) {
+                                    memcpy(matches + moff, full, fl + 1);
+                                    last_match = matches + moff;
+                                    moff = moff + fl + 1;
+                                    mcount++;
+                                }
+                            }
+                        }
+                        ent = (char*)readdir(dp);
                     }
-                } else if (mcount > 1) {
-                    // multiple matches — show them
-                    cx_write(2, "\r\n", 2);
-                    int mi = 0;
-                    char * mp = matches;
-                    while (mi < mcount) {
-                        int ml = strlen(mp);
-                        cx_write(2, mp, ml);
-                        cx_write(2, "  ", 2);
-                        mp = mp + ml + 1;
-                        mi++;
-                    }
-                    cx_write(2, "\r\n", 2);
-                    rl_redraw(prompt, plen, buf, len, pos);
+                    closedir(dp);
                 }
             }
+            if (mcount == 1) {
+                // single match — complete it
+                int nlen = strlen(last_match);
+                int add = nlen - wlen;
+                // add trailing space unless it ends with /
+                int trail = (last_match[nlen - 1] == '/') ? 0 : 1;
+                if (len + add + trail < size) {
+                    memmove(buf + pos + add + trail,
+                            buf + pos, len - pos);
+                    memcpy(buf + pos, last_match + wlen, add);
+                    if (trail) { buf[pos + add] = ' '; }
+                    len = len + add + trail;
+                    pos = pos + add + trail;
+                    buf[len] = 0;
+                    rl_redraw(prompt, plen, buf, len, pos);
+                }
+            } else if (mcount > 1) {
+                // multiple matches — show them
+                cx_write(2, "\r\n", 2);
+                int mi = 0;
+                char * mp = matches;
+                while (mi < mcount) {
+                    int ml = strlen(mp);
+                    cx_write(2, mp, ml);
+                    cx_write(2, "  ", 2);
+                    mp = mp + ml + 1;
+                    mi++;
+                }
+                cx_write(2, "\r\n", 2);
+                rl_redraw(prompt, plen, buf, len, pos);
+            }
+            free(matches);
         } else if (ch[0] >= 32 && len < size - 1) {
             if (pos < len) {
                 memmove(buf + pos + 1, buf + pos, len - pos);
