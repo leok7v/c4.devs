@@ -954,6 +954,200 @@ static int cmd_cut(int argc, char ** argv) {
     return rc;
 }
 
+// ====================== regex engine ======================
+// Adapted from tiny-regex-c (kokke, public domain).
+// Supports: . ^ $ * + ? [abc] [^abc] [a-z] \s \S \w \W \d \D
+
+#define RE_MAX 30
+#define RE_CCL 40
+
+enum {
+    RE_UNUSED, RE_DOT, RE_BEGIN, RE_END, RE_QUEST, RE_STAR,
+    RE_PLUS, RE_CHAR, RE_CLASS, RE_NCLASS, RE_DIGIT, RE_NDIGIT,
+    RE_ALPHA, RE_NALPHA, RE_SPACE, RE_NSPACE
+};
+
+// compiled regex: parallel arrays instead of struct-with-union
+int re_type[RE_MAX];
+int re_ch[RE_MAX];     // for RE_CHAR: the character
+char re_ccl_buf[RE_CCL];  // buffer for character class strings
+
+static int re_matchpat(int pi, char * text, int * mlen);
+
+static int re_compile(char * pat) {
+    int ci = 1; // ccl_buf index (0 reserved)
+    int j = 0;  // compiled pattern index
+    int i = 0;  // source pattern index
+    while (pat[i] && j + 1 < RE_MAX) {
+        int c = pat[i];
+        if (c == '^') { re_type[j] = RE_BEGIN; }
+        else if (c == '$') { re_type[j] = RE_END; }
+        else if (c == '.') { re_type[j] = RE_DOT; }
+        else if (c == '*') { re_type[j] = RE_STAR; }
+        else if (c == '+') { re_type[j] = RE_PLUS; }
+        else if (c == '?') { re_type[j] = RE_QUEST; }
+        else if (c == '\\' && pat[i + 1]) {
+            i++;
+            if (pat[i] == 'd') { re_type[j] = RE_DIGIT; }
+            else if (pat[i] == 'D') { re_type[j] = RE_NDIGIT; }
+            else if (pat[i] == 'w') { re_type[j] = RE_ALPHA; }
+            else if (pat[i] == 'W') { re_type[j] = RE_NALPHA; }
+            else if (pat[i] == 's') { re_type[j] = RE_SPACE; }
+            else if (pat[i] == 'S') { re_type[j] = RE_NSPACE; }
+            else { re_type[j] = RE_CHAR; re_ch[j] = pat[i]; }
+        }
+        else if (c == '[') {
+            int buf_begin = ci;
+            if (pat[i + 1] == '^') {
+                re_type[j] = RE_NCLASS;
+                i++;
+                if (!pat[i + 1]) { return 0; }
+            } else {
+                re_type[j] = RE_CLASS;
+            }
+            while (pat[++i] && pat[i] != ']') {
+                if (pat[i] == '\\' && pat[i + 1]) {
+                    if (ci >= RE_CCL - 1) { return 0; }
+                    re_ccl_buf[ci] = pat[i]; ci++;
+                    i++;
+                } else if (ci >= RE_CCL) {
+                    return 0;
+                }
+                re_ccl_buf[ci] = pat[i]; ci++;
+            }
+            if (ci >= RE_CCL) { return 0; }
+            re_ccl_buf[ci] = 0; ci++;
+            re_ch[j] = buf_begin; // index into re_ccl_buf
+        }
+        else { re_type[j] = RE_CHAR; re_ch[j] = c; }
+        if (!pat[i]) { return 0; } // unterminated pattern
+        i++;
+        j++;
+    }
+    re_type[j] = RE_UNUSED;
+    return 1;
+}
+
+static int re_matchone(int pi, int c) {
+    int t = re_type[pi];
+    if (t == RE_DOT) { return 1; }
+    if (t == RE_DIGIT) { return isdigit(c); }
+    if (t == RE_NDIGIT) { return !isdigit(c); }
+    if (t == RE_ALPHA) { return c == '_' || isalpha(c) || isdigit(c); }
+    if (t == RE_NALPHA) { return !(c == '_' || isalpha(c) || isdigit(c)); }
+    if (t == RE_SPACE) { return isspace(c); }
+    if (t == RE_NSPACE) { return !isspace(c); }
+    if (t == RE_CHAR) { return re_ch[pi] == c; }
+    if (t == RE_CLASS || t == RE_NCLASS) {
+        char * s = re_ccl_buf + re_ch[pi];
+        int found = 0;
+        while (*s) {
+            // range: a-z
+            if (s[0] != '-' && s[1] == '-' && s[2]) {
+                if (c >= s[0] && c <= s[2]) { found = 1; }
+                s = s + 3;
+            } else if (s[0] == '\\' && s[1]) {
+                int mc = s[1];
+                if (mc == 'd' && isdigit(c)) { found = 1; }
+                if (mc == 'D' && !isdigit(c)) { found = 1; }
+                if (mc == 'w' && (c == '_' || isalpha(c) || isdigit(c))) { found = 1; }
+                if (mc == 'W' && !(c == '_' || isalpha(c) || isdigit(c))) { found = 1; }
+                if (mc == 's' && isspace(c)) { found = 1; }
+                if (mc == 'S' && !isspace(c)) { found = 1; }
+                if (mc != 'd' && mc != 'D' && mc != 'w' && mc != 'W' &&
+                    mc != 's' && mc != 'S' && mc == c) { found = 1; }
+                s = s + 2;
+            } else {
+                if (*s == c) { found = 1; }
+                s++;
+            }
+        }
+        return t == RE_CLASS ? found : !found;
+    }
+    return 0;
+}
+
+static int re_matchstar(int pi, int ni, char * text, int * mlen) {
+    int prelen = *mlen;
+    char * pre = text;
+    while (*text && re_matchone(pi, *text)) { text++; (*mlen)++; }
+    while (text >= pre) {
+        if (re_matchpat(ni, text, mlen)) { return 1; }
+        text--;
+        (*mlen)--;
+    }
+    *mlen = prelen;
+    return 0;
+}
+
+static int re_matchplus(int pi, int ni, char * text, int * mlen) {
+    char * pre = text;
+    while (*text && re_matchone(pi, *text)) { text++; (*mlen)++; }
+    while (text > pre) {
+        if (re_matchpat(ni, text, mlen)) { return 1; }
+        text--;
+        (*mlen)--;
+    }
+    return 0;
+}
+
+static int re_matchquest(int pi, int ni, char * text, int * mlen) {
+    if (re_type[pi] == RE_UNUSED) { return 1; }
+    if (re_matchpat(ni, text, mlen)) { return 1; }
+    if (*text && re_matchone(pi, *text)) {
+        (*mlen)++;
+        if (re_matchpat(ni, text + 1, mlen)) { return 1; }
+        (*mlen)--;
+    }
+    return 0;
+}
+
+static int re_matchpat(int pi, char * text, int * mlen) {
+    int pre = *mlen;
+    while (1) {
+        if (re_type[pi] == RE_UNUSED || re_type[pi + 1] == RE_QUEST) {
+            return re_matchquest(pi, pi + 2, text, mlen);
+        }
+        if (re_type[pi + 1] == RE_STAR) {
+            return re_matchstar(pi, pi + 2, text, mlen);
+        }
+        if (re_type[pi + 1] == RE_PLUS) {
+            return re_matchplus(pi, pi + 2, text, mlen);
+        }
+        if (re_type[pi] == RE_END && re_type[pi + 1] == RE_UNUSED) {
+            return *text == 0;
+        }
+        if (*text && re_matchone(pi, *text)) {
+            pi++;
+            text++;
+            (*mlen)++;
+        } else {
+            *mlen = pre;
+            return 0;
+        }
+    }
+}
+
+// Returns index of match in text, or -1. Sets *matchlen.
+static int re_match(char * text, int * matchlen) {
+    *matchlen = 0;
+    if (re_type[0] == RE_BEGIN) {
+        return re_matchpat(1, text, matchlen) ? 0 : -1;
+    }
+    int idx = 0;
+    while (1) {
+        *matchlen = 0;
+        if (re_matchpat(0, text, matchlen)) {
+            if (*text == 0) { return -1; }
+            return idx;
+        }
+        if (*text == 0) { break; }
+        text++;
+        idx++;
+    }
+    return -1;
+}
+
 enum { G_INVERT = 1, G_COUNT = 2, G_NUMBER = 4, G_ICASE = 8 };
 
 static int grep_parse_flags(char * arg) {
@@ -1002,24 +1196,35 @@ static int cmd_grep(int argc, char ** argv) {
             j++;
         }
         lpat[j] = 0;
+        if (!re_compile(lpat)) {
+            cx_err("grep: bad pattern\n");
+            return 1;
+        }
         char buf[4096];
         char lbuf[4096];
         int line_no = 0;
         int matches = 0;
+        int mlen = 0;
         int n = cx_getline(0, buf, 4096);
         while (n > 0) {
             line_no++;
+            // strip trailing newline for regex matching
+            int slen = n;
+            if (slen > 0 && buf[slen - 1] == '\n') { slen--; }
+            char saved = buf[slen];
+            buf[slen] = 0;
             char * search = buf;
             if (flags & G_ICASE) {
                 int k = 0;
-                while (k < n) {
+                while (k < slen) {
                     lbuf[k] = tolower(buf[k]);
                     k++;
                 }
-                lbuf[n] = 0;
+                lbuf[slen] = 0;
                 search = lbuf;
             }
-            int found = strstr(search, lpat) != 0;
+            int found = re_match(search, &mlen) >= 0;
+            buf[slen] = saved;
             int show = (flags & G_INVERT) ? !found : found;
             if (show) {
                 matches++;
@@ -1094,8 +1299,11 @@ static int cmd_sed(int argc, char ** argv) {
         cx_err("sed: empty pattern\n");
         rc = 1;
     }
+    if (!rc && !re_compile(old_pat)) {
+        cx_err("sed: bad pattern\n");
+        rc = 1;
+    }
     if (!rc) {
-        int old_len = strlen(old_pat);
         int new_len = strlen(new_pat);
         char buf[4096];
         char out[8192];
@@ -1108,13 +1316,23 @@ static int cmd_sed(int argc, char ** argv) {
             int done_one = 0;
             while (p < blen) {
                 int can_match = global || !done_one;
-                int fits = p + old_len <= blen;
-                if (can_match && fits &&
-                    memcmp(buf + p, old_pat, old_len) == 0) {
-                    memcpy(out + oi, new_pat, new_len);
-                    oi += new_len;
-                    p += old_len;
-                    done_one = 1;
+                if (can_match) {
+                    int mlen = 0;
+                    int mi = re_match(buf + p, &mlen);
+                    if (mi >= 0) {
+                        // copy chars before match
+                        memcpy(out + oi, buf + p, mi);
+                        oi = oi + mi;
+                        // copy replacement
+                        memcpy(out + oi, new_pat, new_len);
+                        oi = oi + new_len;
+                        p = p + mi + (mlen > 0 ? mlen : 1);
+                        done_one = 1;
+                    } else {
+                        out[oi] = buf[p];
+                        oi++;
+                        p++;
+                    }
                 } else {
                     out[oi] = buf[p];
                     oi++;

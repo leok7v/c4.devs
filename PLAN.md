@@ -980,7 +980,10 @@ between platforms and cx code should not care.
     [x] cx self-hosts cleanly — test/tests.c runs every test twice (native
         and cx-on-cx), 45/45 passing on both paths. See MEMORY.md for the
         five bugs that had to be fixed to get here.
-    [ ] Stage 6 — stretch goals: ps, regex engine, full sed
+    [x] Stage 6 — regex engine (~180 lines, adapted from tiny-regex-c):
+        . ^ $ * + ? [abc] [^abc] [a-z] \s\S \w\W \d\D — wired into
+        grep and sed (both now do real pattern matching, not just strstr)
+    [ ] Stage 6 — stretch goals: ps, full sed
     [x] Stage 7 — interactive shell: readline with history/arrows,
         isatty/termraw/winsize intrinsics, help/exit builtins,
         toys invoked bare enters sh mode (warm VM)
