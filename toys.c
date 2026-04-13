@@ -1969,10 +1969,59 @@ static int cmd_install(int argc, char ** argv) {
     return rc;
 }
 
+static void ls_perms(int mode, char * out) {
+    out[0] = S_ISDIR(mode) ? 'd' : '-';
+    out[1] = (mode & 256) ? 'r' : '-';
+    out[2] = (mode & 128) ? 'w' : '-';
+    out[3] = (mode & 64) ? 'x' : '-';
+    out[4] = (mode & 32) ? 'r' : '-';
+    out[5] = (mode & 16) ? 'w' : '-';
+    out[6] = (mode & 8) ? 'x' : '-';
+    out[7] = (mode & 4) ? 'r' : '-';
+    out[8] = (mode & 2) ? 'w' : '-';
+    out[9] = (mode & 1) ? 'x' : '-';
+    out[10] = 0;
+}
+
+static void ls_human_size(int size, char * out) {
+    if (size < 1024) {
+        cx_itoa(size, out);
+    } else if (size < 1024 * 1024) {
+        int k = size / 1024;
+        int frac = (size % 1024) * 10 / 1024;
+        if (k < 10 && frac > 0) {
+            int len = cx_itoa(k, out);
+            out[len] = '.';
+            out[len + 1] = '0' + frac;
+            out[len + 2] = 'K';
+            out[len + 3] = 0;
+        } else {
+            int len = cx_itoa(k, out);
+            out[len] = 'K';
+            out[len + 1] = 0;
+        }
+    } else {
+        int m = size / (1024 * 1024);
+        int frac = (size % (1024 * 1024)) * 10 / (1024 * 1024);
+        if (m < 10 && frac > 0) {
+            int len = cx_itoa(m, out);
+            out[len] = '.';
+            out[len + 1] = '0' + frac;
+            out[len + 2] = 'M';
+            out[len + 3] = 0;
+        } else {
+            int len = cx_itoa(m, out);
+            out[len] = 'M';
+            out[len + 1] = 0;
+        }
+    }
+}
+
 static int cmd_ls(int argc, char ** argv) {
     int rc = 0;
     int show_all = 0;
     int long_fmt = 0;
+    int human = 0;
     int i = 1;
     while (i < argc && argv[i][0] == '-') {
         if (strcmp(argv[i], "--") == 0) {
@@ -1981,12 +2030,9 @@ static int cmd_ls(int argc, char ** argv) {
         }
         char * f = argv[i] + 1;
         while (*f) {
-            if (*f == 'a') {
-                show_all = 1;
-            }
-            if (*f == 'l') {
-                long_fmt = 1;
-            }
+            if (*f == 'a') { show_all = 1; }
+            if (*f == 'l') { long_fmt = 1; }
+            if (*f == 'h') { human = 1; }
             f++;
         }
         i++;
@@ -2050,13 +2096,26 @@ static int cmd_ls(int argc, char ** argv) {
                 memcpy(path + dl, n, nl2 + 1);
                 struct cx_stat st;
                 if (stat(path, (void*)&st) == 0) {
-                    char ch = '-';
-                    if (S_ISDIR(st.mode)) {
-                        ch = 'd';
-                    }
-                    cx_write(1, &ch, 1);
+                    char perms[12];
+                    ls_perms(st.mode, perms);
+                    cx_puts(perms);
+                    cx_out("  ", 2);
+                    char nb[16];
+                    cx_itopad(st.nlink, nb, 2);
+                    cx_puts(nb);
                     cx_out(" ", 1);
-                    cx_putint(1, st.size);
+                    if (human) {
+                        char hb[16];
+                        ls_human_size(st.size, hb);
+                        int hl = strlen(hb);
+                        // right-align to 5 chars
+                        int pad = 5 - hl;
+                        while (pad > 0) { cx_out(" ", 1); pad--; }
+                        cx_puts(hb);
+                    } else {
+                        cx_itopad(st.size, nb, 8);
+                        cx_puts(nb);
+                    }
                     cx_out(" ", 1);
                 }
             }
@@ -3997,8 +4056,8 @@ static void setup(void) {
     cmd_reg("paste", cmd_paste, "paste [-d DELIM] [FILE...]");
     cmd_reg("tr", cmd_tr, "tr SET1 SET2");
     cmd_reg("cut", cmd_cut, "cut -d DELIM -f FIELD [FILE...]");
-    cmd_reg("grep", cmd_grep, "grep [-ivcn] PATTERN [FILE...]");
-    cmd_reg("sed", cmd_sed, "sed s/OLD/NEW/[g] [FILE...]");
+    cmd_reg("grep", cmd_grep, "grep [-ivcn] REGEX [FILE...] (.^$*+?[a-z]\\d\\w\\s)");
+    cmd_reg("sed", cmd_sed, "sed s/REGEX/REPL/[g] [FILE...] (.^$*+?[a-z]\\d\\w\\s)");
     cmd_reg("uniq", cmd_uniq, "uniq [-c] [FILE...]");
     cmd_reg("sort", cmd_sort, "sort [-r] [FILE...]");
     cmd_reg("printf", cmd_printf, "printf FORMAT [ARGS...]");
@@ -4014,7 +4073,7 @@ static void setup(void) {
     cmd_reg("cd", cmd_cd, "cd [DIR]");
     cmd_reg("env", cmd_env, "env [NAME=VALUE...]");
     cmd_reg("install", cmd_install, "install DIR");
-    cmd_reg("ls", cmd_ls, "ls [DIR...]");
+    cmd_reg("ls", cmd_ls, "ls [-lah] [DIR...]");
     cmd_reg("find", cmd_find, "find [DIR...] [-name PAT] [-type f|d]");
     cmd_reg("xargs", cmd_xargs, "xargs [CMD [ARGS...]]");
     cmd_reg("test", cmd_test, "test EXPRESSION");
