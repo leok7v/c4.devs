@@ -18,7 +18,7 @@ just a thin dispatch layer on top.
 ## The one command that matters
 
 Any change to `cx.c`, `toys.c`, or files under `tests/` is only done
-when this passes with `SUMMARY: 45/45 tests passed.`:
+when this passes with `SUMMARY: 46/46 tests passed.`:
 
     cc -Wall -Wpedantic -o build/cx cx.c && build/cx cx.c tests/all.c
 

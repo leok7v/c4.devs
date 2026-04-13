@@ -1009,23 +1009,15 @@ between platforms and cx code should not care.
         (a) ~ expansion: ~ and ~/path expand to $HOME
         (b) type builtin: classifies builtins vs PATH executables
         (c) tab completion for registered command names (single/multi match)
+    [x] cx.c: assert() with stack trace, __FILE__, __LINE__:
+        assert(cond) is an intrinsic (I_ASRT). On failure prints
+        file:line, function name, full call chain (up to 16 frames),
+        then exit(-1). fn_name_at() maps code addresses to function
+        names via sym_pool. __FILE__ and __LINE__ are lexer builtins.
+        tests/assertions.c covers pass-through, expressions, __LINE__
+        advancement, __FILE__ string, and subprocess assert(0) failure.
     [ ] Stage 11 — cx.c: float, double, unsigned, long long
     [ ] Stage 12 — sh: $((expr)) arithmetic expansion (needs Stage 11)
-
----
-
-## To discuss
-
-- **assert()** — runtime assertion macro for cx.c and toys.c.
-  What form? `assert(cond)` with message to stderr + abort?
-  Should it be a cx intrinsic, a preprocessor macro, or both?
-  How does it interact with self-hosting (cx doesn't have macros
-  with stringification)?
-
-- **Trivial stack trace** — on fatal error (assert failure, segfault
-  in VM), print the cx call stack (function names + PC offsets).
-  The symbol table is already in memory at runtime — just walk it.
-  How deep? Just the cx-level stack, or also the native frames?
 
 ---
 

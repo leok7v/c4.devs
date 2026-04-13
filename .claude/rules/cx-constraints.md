@@ -45,6 +45,13 @@ watch for silent memory corruption just past the end of `code_pool` —
 ASAN catches it; unluckily, a plain segfault also reveals it. Bump
 the pool if needed.
 
+## Don't use `'"'` (double-quote char literal) in source
+
+cx's self-compiled lexer misparses the character literal `'"'`. Use
+the ASCII value `34` instead: `tk = 34;` not `tk = '"';`. Discovered
+when adding `__FILE__` support — the `tk = '"'` line broke
+self-compilation with "bad global declaration" errors far downstream.
+
 ## Self-hosted intrinsics forward, they don't stub
 
 Filesystem intrinsics that need host types (`struct stat`, `DIR*`,

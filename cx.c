@@ -146,7 +146,7 @@ enum { CHAR, INT32, INT64, FNPTR = 255, PTR = 256 };
 // identifier offsets (since we can't create an ident struct)
 enum {
     Tk, Hash, Name, Class, Type, Val, HClass, HType, HVal, Utyedef, Extent,
-    Sline, Idsz
+    Sline, FnLine, FnFile, Idsz
 };
 
 void next(void) {
@@ -230,6 +230,24 @@ void next(void) {
                     return;
                 }
                 id = id + Idsz;
+            }
+            // __LINE__ and __FILE__ builtins
+            if (p - pp == 8 && !memcmp(pp, "__LINE__", 8)) {
+                ival = line; tk = Num; return;
+            }
+            if (p - pp == 8 && !memcmp(pp, "__FILE__", 8)) {
+                pp = data;
+                if (cur_file) {
+                    i = 0;
+                    while (((char *)cur_file)[i]) {
+                        *data++ = ((char *)cur_file)[i];
+                        i++;
+                    }
+                }
+                *data++ = 0;
+                ival = (int64_t)pp;
+                tk = 34;
+                return;
             }
             id[Name] = (int64_t)pp;
             id[Hash] = tk;
@@ -443,9 +461,11 @@ void fatal(char *s) {
 }
 
 // find function name for a code address (byte offset from code_base)
-char * fn_name_at(int64_t addr, int64_t *fn_offset) {
+char * fn_name_at(int64_t addr, int64_t *fn_offset,
+                  int64_t *fn_line, char **fn_file) {
     int64_t *s; int64_t best; char *name;
     best = -1; name = 0;
+    *fn_line = 0; *fn_file = 0;
     s = sym_pool;
     while (s[Tk]) {
         if (s[Class] == Fun && s[Val]) {
@@ -455,6 +475,8 @@ char * fn_name_at(int64_t addr, int64_t *fn_offset) {
                 best = entry;
                 name = (char *)s[Name];
                 *fn_offset = addr - entry;
+                *fn_line = s[FnLine];
+                *fn_file = (char *)s[FnFile];
             }
         }
         s = s + Idsz;
@@ -462,9 +484,33 @@ char * fn_name_at(int64_t addr, int64_t *fn_offset) {
     return name;
 }
 
+// extract basename from a file path
+char * file_basename(char *path) {
+    char *base; char *s;
+    if (!path) return 0;
+    base = path;
+    s = path;
+    while (*s) {
+        if (*s == '/') { base = s + 1; }
+        s++;
+    }
+    return base;
+}
+
+// print function name (not null-terminated in source, ends at non-ident char)
+void print_fn_name(char *name) {
+    while ((*name >= 'a' && *name <= 'z') ||
+           (*name >= 'A' && *name <= 'Z') ||
+           (*name >= '0' && *name <= '9') || *name == '_') {
+        printf("%c", *name);
+        name++;
+    }
+}
+
 // print stack trace from current bp
 void stacktrace(int64_t *bp_cur, int64_t *stack_top) {
-    int depth; int64_t ret; int64_t off; char *name; char nb[20]; int ni;
+    int depth; int64_t ret; int64_t off;
+    int64_t fline; char *ffile; char *name; char *base;
     depth = 0;
     printf("stack trace:\n");
     while (depth < 16) {
@@ -472,26 +518,19 @@ void stacktrace(int64_t *bp_cur, int64_t *stack_top) {
         if ((int64_t *)bp_cur[0] >= stack_top) break;
         ret = bp_cur[1];
         if (ret == -1) break;
-        off = 0;
-        name = fn_name_at(ret, &off);
+        off = 0; fline = 0; ffile = 0;
+        name = fn_name_at(ret, &off, &fline, &ffile);
         if (name) {
-            // print name (not null-terminated in source, but ends at non-alnum)
             printf("  ");
-            while ((*name >= 'a' && *name <= 'z') ||
-                   (*name >= 'A' && *name <= 'Z') ||
-                   (*name >= '0' && *name <= '9') || *name == '_') {
-                printf("%c", *name);
-                name++;
+            print_fn_name(name);
+            base = file_basename(ffile);
+            if (base && fline > 0) {
+                printf(" (%s:%d)\n", base, (int)fline);
+            } else {
+                printf("+%d\n", (int)off);
             }
-            printf("+%d\n", (int)off);
         } else {
-            ni = 0;
-            ret = ret < 0 ? -ret : ret;
-            if (ret == 0) { nb[ni++] = '0'; }
-            while (ret > 0) { nb[ni++] = '0' + (int)(ret % 10); ret = ret / 10; }
-            printf("  <0x");
-            while (ni > 0) { ni--; printf("%c", nb[ni]); }
-            printf(">\n");
+            printf("  <+%d>\n", (int)ret);
         }
         bp_cur = (int64_t *)bp_cur[0];
         depth++;
@@ -3058,6 +3097,8 @@ int64_t *compile(char *filename) {
                 }
                 d[Class] = Fun;
                 d[Val] = (int64_t)(e + 1);
+                d[FnLine] = line;
+                d[FnFile] = cur_file;
                 // patch forward calls
                 j = 0;
                 while (j < fwd_sp) {
@@ -3731,9 +3772,25 @@ int run(int64_t *pc_offset, int argc, char **argv) {
             case I_SNCM: a = strncmp((char *)sp[2], (char *)sp[1], *sp); break;
             case I_ASRT:
                 if (!*sp) {
-                    printf("assert failed at cycle %d\n", (int)cycle);
+                    {
+                        int64_t aoff; int64_t aln; char *afn; char *af;
+                        int64_t apc;
+                        apc = (int64_t)((char *)(pc - 1) - (char *)code_base);
+                        aoff = 0; aln = 0; af = 0;
+                        afn = fn_name_at(apc, &aoff, &aln, &af);
+                        if (afn) {
+                            char *ab; ab = file_basename(af);
+                            if (ab) { printf("%s:", ab); }
+                            if (aln > 0) { printf("%d: ", (int)aln); }
+                            printf("assert failed in ");
+                            print_fn_name(afn);
+                            printf("\n");
+                        } else {
+                            printf("assert failed\n");
+                        }
+                    }
                     stacktrace(bp, t);
-                    return -1;
+                    exit(-1);
                 }
                 break;
             case I_ALCA: a = (int64_t)malloc(*sp); break;
